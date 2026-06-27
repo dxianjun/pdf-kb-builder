@@ -1,0 +1,12 @@
+markitdown
+opencc-python-reimplemented
+pymupdf
+pypdf
+pdfplumber
+pypdfium2
+reportlab
+rapidocr
+onnxruntime
+opencv-python-headless
+pillow
+numpy
