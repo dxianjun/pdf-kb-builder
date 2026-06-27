@@ -1,4 +1,5 @@
 markitdown
+winsdk
 opencc-python-reimplemented
 pymupdf
 pypdf

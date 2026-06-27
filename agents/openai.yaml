@@ -1,4 +1,4 @@
 interface:
   display_name: "PDF KB Builder"
-  short_description: "Build searchable PDF knowledge bases"
-  default_prompt: "Build a searchable knowledge base from PDFs in a directory."
+  short_description: "Build MarkItDown-first PDF knowledge bases"
+  default_prompt: "Build a searchable knowledge base from PDFs in a directory using MarkItDown first, then repair missing pages with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR."

@@ -1,13 +1,13 @@
 ---
 name: pdf-kb-builder
-description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, OCR-backed extraction, PDF-to-Markdown repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
+description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, MarkItDown-first PDF-to-Markdown conversion, OCR-backed extraction, PDF coverage repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
 ---
 
 # PDF KB Builder
 
 ## Core Rule
 
-Build the knowledge base from source PDFs first, then verify retrieval from generated artifacts. Do not answer from memory when the KB can be built or searched.
+Always build from source PDFs before answering. On the first build for a PDF, use MarkItDown first, then cross-check and repair with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR.
 
 ## Workflow
 
@@ -20,23 +20,30 @@ $env:AI_TOOLS_HOME = "D:\ai_tools"
 python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 ```
 
-4. Include optional curated material:
+4. The build pipeline is mandatory:
+   - Convert each PDF with MarkItDown and write that as the Markdown base.
+   - Extract page text again with PyMuPDF and pdfplumber.
+   - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 頁補漏` section.
+   - If neither native extractor finds text, run Windows OCR first, then RapidOCR only if Windows OCR returns no text.
+   - Record source coverage in `.pdf_kb/coverage_report.json`.
+5. Include optional curated material:
    - Place `qa_overrides.jsonl` under `.pdf_kb/` for high-priority exact answers.
    - Place `00_*.md` under `.pdf_kb/markdown/` for supplemental Markdown indexes.
    - Re-run `build --resume` after adding supplemental files.
-5. Search:
+6. Re-run `build` whenever PDFs are added, deleted, or changed. The script synchronizes `.pdf_kb/markdown`, removes generated Markdown for deleted PDFs, reuses unchanged PDFs by hash, regenerates changed PDFs, and rebuilds `markdown_chunks.jsonl`.
+7. Search by KB directory so retrieval stays decoupled from KB content:
 
 ```powershell
-python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查詢文字" --kb ".pdf_kb\markdown_chunks.jsonl" --qa ".pdf_kb\qa_overrides.jsonl"
+python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查詢文字" --kb-dir "D:\path\to\pdf-folder\.pdf_kb"
 ```
 
 ## Generated KB Layout
 
-- `.pdf_kb/markdown/*.md`: extracted Markdown per PDF, with OCR text for pages that lack a text layer.
+- `.pdf_kb/markdown/*.md`: MarkItDown output plus page-level repaired Markdown.
 - `.pdf_kb/markdown_chunks.jsonl`: searchable chunks.
-- `.pdf_kb/manifest.json`: source files, hashes, line counts, chunk counts.
+- `.pdf_kb/manifest.json`: source paths, generated Markdown paths, hashes, line counts, chunk counts; used for sync.
 - `.pdf_kb/catalog.md`: human-readable catalog.
-- `.pdf_kb/coverage_report.json`: native text / OCR / no-text page statistics.
+- `.pdf_kb/coverage_report.json`: MarkItDown status, PyMuPDF/pdfplumber pages, Windows OCR pages, RapidOCR pages, repaired pages, and no-text pages.
 - `.pdf_kb/qa_overrides.jsonl`: optional curated answers, searched before chunks.
 
 ## Dependencies
@@ -45,8 +52,8 @@ Use `scripts/requirements.txt` for Python packages and `scripts/install_windows_
 
 The installer covers:
 
-- PDF tools: PyMuPDF, pypdf, pdfplumber, pypdfium2, markitdown, reportlab.
-- OCR tools: rapidocr, onnxruntime, opencv-python-headless, Pillow, numpy.
+- PDF tools: MarkItDown, PyMuPDF, pdfplumber, pypdf, pypdfium2, reportlab.
+- OCR tools: Windows OCR runtime (`winsdk`), RapidOCR, onnxruntime, opencv-python-headless, Pillow, numpy.
 - Chinese conversion: opencc-python-reimplemented.
 - Windows OCR language capabilities: zh-HK, zh-TW, zh-CN.
 - Windows CJK font capabilities and common font checks.
@@ -55,6 +62,7 @@ The installer covers:
 
 - QA overrides are intentionally high priority.
 - Supplemental `00_*.md` files are indexed as `doc_id: 0`, `-1`, etc.
+- Search code lives in the skill script; KB files contain only generated content and indexes. Updating the KB does not require changing the skill package.
 - Chunk search is lexical and deterministic; for ambiguous product names, prefer adding narrow QA overrides with source line citations.
 
 ## Validation
@@ -67,4 +75,4 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py deps
 python path\to\pdf-kb-builder\scripts\pdf_kb.py search "known query" --kb ".pdf_kb\markdown_chunks.jsonl"
 ```
 
-For Chinese PDFs, also inspect `.pdf_kb/coverage_report.json`: pages in `no_ocr_text_pages` should be blank, photos, separators, or otherwise non-text pages.
+For Chinese PDFs, inspect `.pdf_kb/coverage_report.json`: pages in `no_ocr_text_pages` should be blank, photos, separators, or otherwise non-text pages.

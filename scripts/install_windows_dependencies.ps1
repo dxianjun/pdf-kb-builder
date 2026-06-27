@@ -67,7 +67,7 @@ Write-Host "Validating Python imports"
 $validation = @"
 import sys
 sys.path.insert(0, r"$TargetPath")
-import fitz, pypdf, pdfplumber, rapidocr, opencc, PIL, numpy
+import fitz, markitdown, pypdf, pdfplumber, rapidocr, opencc, PIL, numpy, winsdk
 print("dependencies ok")
 "@
 & $Python -c $validation

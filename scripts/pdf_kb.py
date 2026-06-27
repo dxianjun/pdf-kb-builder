@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -20,9 +22,19 @@ except Exception:  # pragma: no cover - dependency check reports this
     OpenCC = None  # type: ignore
 
 try:
+    from markitdown import MarkItDown  # type: ignore
+except Exception:  # pragma: no cover
+    MarkItDown = None  # type: ignore
+
+try:
     import fitz  # type: ignore
 except Exception:  # pragma: no cover
     fitz = None  # type: ignore
+
+try:
+    import pdfplumber  # type: ignore
+except Exception:  # pragma: no cover
+    pdfplumber = None  # type: ignore
 
 try:
     import numpy as np  # type: ignore
@@ -101,6 +113,63 @@ def safe_name(doc_id: int, pdf_path: Path) -> str:
     stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem)
     stem = re.sub(r"\s+", " ", stem).strip()
     return f"{doc_id:02d}_{stem[:90]}.md"
+
+
+def stable_markdown_name(relative_pdf: str, pdf_path: Path) -> str:
+    digest = hashlib.sha1(relative_pdf.replace("\\", "/").encode("utf-8")).hexdigest()[:12]
+    stem = to_hk(repair_mojibake(pdf_path.stem))
+    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem)
+    stem = re.sub(r"\s+", " ", stem).strip() or "document"
+    return f"pdf_{digest}_{stem[:80]}.md"
+
+
+def relative_to_root(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def load_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def source_key(item: dict[str, Any]) -> str:
+    return str(item.get("source_path") or item.get("pdf_file") or "")
+
+
+def remove_stale_generated_markdown(
+    *,
+    source_dir: Path,
+    markdown_dir: Path,
+    previous_manifest: list[dict[str, Any]],
+    expected_markdown_by_source: dict[str, Path],
+) -> None:
+    markdown_root = markdown_dir.resolve()
+    for item in previous_manifest:
+        if item.get("source_type") == "supplemental_markdown":
+            continue
+        key = source_key(item)
+        markdown_file = item.get("markdown_file")
+        if not key or not markdown_file:
+            continue
+        old_path = (source_dir / markdown_file).resolve()
+        expected_path = expected_markdown_by_source.get(key)
+        if key in expected_markdown_by_source and expected_path and old_path == expected_path.resolve():
+            continue
+        try:
+            old_path.relative_to(markdown_root)
+        except ValueError:
+            continue
+        if old_path.name.startswith("00_"):
+            continue
+        if old_path.exists():
+            old_path.unlink()
 
 
 def line_offsets(lines: list[str]) -> list[int]:
@@ -194,57 +263,277 @@ def pdf_to_markdown(
     zoom: float = 2.0,
     min_text_chars: int = 5,
 ) -> dict[str, Any]:
-    if fitz is None:
-        raise RuntimeError("PyMuPDF is missing. Install dependencies before building.")
+    markitdown_error = ""
+    try:
+        markitdown_text = convert_with_markitdown(pdf_path)
+        markitdown_status = "ok"
+    except RuntimeError:
+        raise
+    except Exception as exc:  # pragma: no cover - depends on converter internals
+        markitdown_text = ""
+        markitdown_status = "error"
+        markitdown_error = f"{type(exc).__name__}: {exc}"
 
-    document = fitz.open(pdf_path)
-    engine = RapidOCR() if use_ocr and RapidOCR is not None and np is not None else None
+    extraction_errors: dict[str, str] = {}
+    try:
+        pymupdf_pages, pymupdf_page_count = extract_pages_with_pymupdf(pdf_path)
+    except Exception as exc:  # pragma: no cover - corrupt PDF / library behavior
+        pymupdf_pages, pymupdf_page_count = {}, 0
+        extraction_errors["pymupdf"] = f"{type(exc).__name__}: {exc}"
+
+    try:
+        pdfplumber_pages, pdfplumber_page_count = extract_pages_with_pdfplumber(pdf_path)
+    except Exception as exc:  # pragma: no cover - corrupt PDF / library behavior
+        pdfplumber_pages, pdfplumber_page_count = {}, 0
+        extraction_errors["pdfplumber"] = f"{type(exc).__name__}: {exc}"
+
+    page_count = max(
+        [pymupdf_page_count, pdfplumber_page_count, *pymupdf_pages.keys(), *pdfplumber_pages.keys()],
+        default=0,
+    )
+    rapid_engine = None
     lines: list[str] = [
         f"# {to_hk(repair_mojibake(pdf_path.stem))}",
         "",
         f"> Source PDF: `{pdf_path.name}`",
         "",
+        "## MarkItDown 轉換結果",
+        "",
     ]
-    native_pages = 0
-    ocr_pages: list[int] = []
-    no_ocr_pages: list[int] = []
-
-    for page_index in range(document.page_count):
-        page_number = page_index + 1
-        page = document[page_index]
-        native_text = normalize_markdown(page.get_text("text") or "")
-        lines.append(f"## PDF 第 {page_number} 頁")
+    if markitdown_text.strip():
+        lines.append(markitdown_text.strip())
+        lines.append("")
+    elif markitdown_error:
+        lines.append(f"_MarkItDown 轉換失敗：{markitdown_error}_")
         lines.append("")
 
-        if len(native_text.strip()) >= min_text_chars:
-            native_pages += 1
-            lines.append(native_text.strip())
-            lines.append("")
-            continue
+    base_compact = compact_text(markitdown_text)
+    pymupdf_text_pages = [
+        page_number for page_number, text in pymupdf_pages.items() if useful_text(text, min_text_chars)
+    ]
+    pdfplumber_text_pages = [
+        page_number for page_number, text in pdfplumber_pages.items() if useful_text(text, min_text_chars)
+    ]
+    windows_ocr_pages: list[int] = []
+    rapidocr_pages: list[int] = []
+    ocr_pages: list[int] = []
+    no_ocr_pages: list[int] = []
+    supplemented_pages: list[int] = []
+    page_sources: list[dict[str, Any]] = []
 
-        if engine is None:
-            no_ocr_pages.append(page_number)
-            lines.append("_此頁沒有可抽取文字層，且 OCR 未啟用或依賴缺失。_")
-            lines.append("")
-            continue
+    for page_number in range(1, page_count + 1):
+        source, page_text = best_native_page_text(
+            page_number,
+            pymupdf_pages.get(page_number, ""),
+            pdfplumber_pages.get(page_number, ""),
+            min_text_chars,
+        )
 
-        ocr_lines = ocr_page(engine, page, zoom)
-        if ocr_lines:
-            ocr_pages.append(page_number)
-            lines.extend(ocr_lines)
-        else:
+        if not page_text and use_ocr:
+            windows_lines = windows_ocr_page(pdf_path, page_number, zoom)
+            if windows_lines:
+                source = "windows_ocr"
+                page_text = "\n".join(windows_lines)
+                windows_ocr_pages.append(page_number)
+                ocr_pages.append(page_number)
+            else:
+                if rapid_engine is None and RapidOCR is not None and np is not None:
+                    rapid_engine = RapidOCR()
+                rapid_lines = rapidocr_page(pdf_path, page_number, zoom, rapid_engine)
+                if rapid_lines:
+                    source = "rapidocr"
+                    page_text = "\n".join(rapid_lines)
+                    rapidocr_pages.append(page_number)
+                    ocr_pages.append(page_number)
+
+        page_compact = compact_text(page_text)
+        already_in_markitdown = bool(page_compact and page_compact in base_compact)
+        if page_text and not already_in_markitdown:
+            lines.append(f"## PDF 第 {page_number} 頁補漏（{source}）")
+            lines.append("")
+            lines.append(normalize_markdown(page_text).strip())
+            lines.append("")
+            supplemented_pages.append(page_number)
+
+        if not page_text:
             no_ocr_pages.append(page_number)
-            lines.append("_此頁 OCR 未識別出文字。_")
+
+        page_sources.append(
+            {
+                "page": page_number,
+                "source": source or "none",
+                "chars": len(page_text.strip()),
+                "already_in_markitdown": already_in_markitdown,
+                "added_to_markdown": page_number in supplemented_pages,
+            }
+        )
+
+    if page_count == 0 and not markitdown_text.strip():
+        lines.append("_未能從 MarkItDown、PyMuPDF 或 pdfplumber 抽取內容。_")
         lines.append("")
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
     return {
-        "pages": document.page_count,
-        "native_text_pages": native_pages,
+        "pages": page_count,
+        "markitdown_status": markitdown_status,
+        "markitdown_chars": len(markitdown_text.strip()),
+        "markitdown_error": markitdown_error,
+        "native_text_pages": len(set(pymupdf_text_pages + pdfplumber_text_pages)),
+        "pymupdf_text_pages": pymupdf_text_pages,
+        "pdfplumber_text_pages": pdfplumber_text_pages,
+        "windows_ocr_pages": windows_ocr_pages,
+        "rapidocr_pages": rapidocr_pages,
         "ocr_pages": ocr_pages,
         "no_ocr_text_pages": no_ocr_pages,
+        "supplemented_pages": supplemented_pages,
+        "page_sources": page_sources,
+        "extraction_errors": extraction_errors,
     }
+
+
+def convert_with_markitdown(pdf_path: Path) -> str:
+    if MarkItDown is None:
+        raise RuntimeError("MarkItDown is missing. Install dependencies before building.")
+    result = MarkItDown().convert(pdf_path)
+    text = getattr(result, "text_content", None) or getattr(result, "markdown", None) or str(result)
+    return normalize_markdown(text) if str(text).strip() else ""
+
+
+def extract_pages_with_pymupdf(pdf_path: Path) -> tuple[dict[int, str], int]:
+    if fitz is None:
+        return {}, 0
+    document = fitz.open(pdf_path)
+    pages: dict[int, str] = {}
+    for page_index in range(document.page_count):
+        page_number = page_index + 1
+        pages[page_number] = normalize_markdown(document[page_index].get_text("text") or "").strip()
+    return pages, document.page_count
+
+
+def extract_pages_with_pdfplumber(pdf_path: Path) -> tuple[dict[int, str], int]:
+    if pdfplumber is None:
+        return {}, 0
+    pages: dict[int, str] = {}
+    with pdfplumber.open(pdf_path) as document:
+        for page_index, page in enumerate(document.pages, start=1):
+            text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+            pages[page_index] = normalize_markdown(text).strip()
+        return pages, len(document.pages)
+
+
+def useful_text(text: str, min_text_chars: int) -> bool:
+    return len(compact_text(text)) >= min_text_chars
+
+
+def best_native_page_text(
+    page_number: int,
+    pymupdf_text: str,
+    pdfplumber_text: str,
+    min_text_chars: int,
+) -> tuple[str, str]:
+    candidates = [
+        ("pymupdf", normalize_markdown(pymupdf_text).strip()),
+        ("pdfplumber", normalize_markdown(pdfplumber_text).strip()),
+    ]
+    source, text = max(candidates, key=lambda item: len(compact_text(item[1])))
+    if useful_text(text, min_text_chars):
+        return source, text
+    return "", ""
+
+
+def windows_ocr_page(pdf_path: Path, page_number: int, zoom: float = 2.0) -> list[str]:
+    if fitz is None:
+        return []
+    try:
+        import winsdk.windows.globalization as win_globalization  # type: ignore
+        import winsdk.windows.graphics.imaging as win_imaging  # type: ignore
+        import winsdk.windows.media.ocr as win_ocr  # type: ignore
+        import winsdk.windows.storage.streams as win_streams  # type: ignore
+    except Exception:
+        return []
+
+    try:
+        png_bytes = render_page_png(pdf_path, page_number, zoom)
+        return asyncio.run(
+            windows_ocr_png_bytes(
+                png_bytes,
+                win_globalization,
+                win_imaging,
+                win_ocr,
+                win_streams,
+            )
+        )
+    except Exception:
+        return []
+
+
+async def windows_ocr_png_bytes(
+    png_bytes: bytes,
+    win_globalization: Any,
+    win_imaging: Any,
+    win_ocr: Any,
+    win_streams: Any,
+) -> list[str]:
+    stream = win_streams.InMemoryRandomAccessStream()
+    writer = win_streams.DataWriter(stream)
+    writer.write_bytes(png_bytes)
+    await writer.store_async()
+    await writer.flush_async()
+    writer.detach_stream()
+    stream.seek(0)
+
+    decoder = await win_imaging.BitmapDecoder.create_async(stream)
+    bitmap = await decoder.get_software_bitmap_async()
+
+    language_tags = ["zh-Hant-HK", "zh-Hant-TW", "zh-Hans-CN", "en-US"]
+    engines: list[Any] = []
+    for tag in language_tags:
+        language = win_globalization.Language(tag)
+        if win_ocr.OcrEngine.is_language_supported(language):
+            engine = win_ocr.OcrEngine.try_create_from_language(language)
+            if engine is not None:
+                engines.append(engine)
+
+    profile_engine = win_ocr.OcrEngine.try_create_from_user_profile_languages()
+    if profile_engine is not None:
+        engines.append(profile_engine)
+
+    seen: set[str] = set()
+    for engine in engines:
+        result = await engine.recognize_async(bitmap)
+        lines = []
+        for line in result.lines:
+            text = " ".join(word.text for word in line.words).strip()
+            text = normalize_markdown(text).strip()
+            if text:
+                lines.append(text)
+        joined = "\n".join(lines)
+        key = compact_text(joined)
+        if key and key not in seen:
+            seen.add(key)
+            return lines
+    return []
+
+
+def render_page_png(pdf_path: Path, page_number: int, zoom: float) -> bytes:
+    document = fitz.open(pdf_path)
+    page = document[page_number - 1]
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+    return pixmap.tobytes("png")
+
+
+def rapidocr_page(
+    pdf_path: Path,
+    page_number: int,
+    zoom: float = 2.0,
+    engine: Any | None = None,
+) -> list[str]:
+    if fitz is None or np is None or RapidOCR is None:
+        return []
+    document = fitz.open(pdf_path)
+    page = document[page_number - 1]
+    return ocr_page(engine or RapidOCR(), page, zoom)
 
 
 def ocr_page(engine: Any, page: Any, zoom: float) -> list[str]:
@@ -302,6 +591,7 @@ def build_kb(
     recursive: bool = False,
     use_ocr: bool = True,
     resume: bool = False,
+    force: bool = False,
 ) -> dict[str, Any]:
     source_dir = source_dir.resolve()
     out = (out_dir or source_dir / ".pdf_kb").resolve()
@@ -313,35 +603,71 @@ def build_kb(
         [path for path in source_dir.glob(pdf_pattern) if out not in path.parents],
         key=lambda path: str(path.relative_to(source_dir)).lower(),
     )
+    previous_manifest = load_json(out / "manifest.json", [])
+    previous_coverage = load_json(out / "coverage_report.json", [])
+    previous_by_source = {
+        source_key(item): item
+        for item in previous_manifest
+        if item.get("source_type") != "supplemental_markdown" and source_key(item)
+    }
+    previous_coverage_by_source = {
+        source_key(item): item
+        for item in previous_coverage
+        if isinstance(item, dict) and source_key(item)
+    }
+    expected_markdown_by_source: dict[str, Path] = {}
+    for pdf_path in pdfs:
+        rel_pdf_raw = str(pdf_path.relative_to(source_dir))
+        expected_markdown_by_source[rel_pdf_raw] = (
+            markdown_dir / stable_markdown_name(rel_pdf_raw, pdf_path)
+        )
+    remove_stale_generated_markdown(
+        source_dir=source_dir,
+        markdown_dir=markdown_dir,
+        previous_manifest=previous_manifest,
+        expected_markdown_by_source=expected_markdown_by_source,
+    )
 
     manifest: list[dict[str, Any]] = []
     chunks: list[dict[str, Any]] = []
     coverage: list[dict[str, Any]] = []
 
     for doc_id, pdf_path in enumerate(pdfs, start=1):
-        md_path = markdown_dir / safe_name(doc_id, pdf_path)
-        if resume and md_path.exists() and md_path.stat().st_size > 0:
-            stats = {"pages": None, "native_text_pages": None, "ocr_pages": [], "no_ocr_text_pages": []}
+        rel_pdf_raw = str(pdf_path.relative_to(source_dir))
+        rel_pdf = to_hk(repair_mojibake(rel_pdf_raw))
+        md_path = expected_markdown_by_source[rel_pdf_raw]
+        pdf_sha = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+        previous_item = previous_by_source.get(rel_pdf_raw)
+        unchanged = bool(
+            previous_item
+            and previous_item.get("sha256") == pdf_sha
+            and md_path.exists()
+            and md_path.stat().st_size > 0
+        )
+        if unchanged and not force:
+            stats = dict(previous_coverage_by_source.get(rel_pdf_raw, {}))
+            stats.update({"reused": True})
         else:
             stats = pdf_to_markdown(pdf_path, md_path, use_ocr=use_ocr)
+            stats["reused"] = False
 
         markdown = md_path.read_text(encoding="utf-8", errors="replace")
         doc_chunks = make_chunks(markdown)
-        rel_pdf = to_hk(repair_mojibake(str(pdf_path.relative_to(source_dir))))
-        rel_md = str(md_path.relative_to(source_dir))
+        rel_md = relative_to_root(md_path, source_dir)
 
         manifest.append(
             {
                 "doc_id": doc_id,
+                "source_path": rel_pdf_raw,
                 "pdf_file": rel_pdf,
                 "markdown_file": rel_md,
                 "chars": len(markdown),
                 "lines": len(markdown.splitlines()),
                 "chunks": len(doc_chunks),
-                "sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
+                "sha256": pdf_sha,
             }
         )
-        coverage.append({"doc_id": doc_id, "pdf_file": rel_pdf, **stats})
+        coverage.append({"doc_id": doc_id, "source_path": rel_pdf_raw, "pdf_file": rel_pdf, **stats})
 
         for chunk_index, chunk in enumerate(doc_chunks, start=1):
             chunks.append(
@@ -363,7 +689,7 @@ def build_kb(
             {
                 "doc_id": -supplemental_index,
                 "pdf_file": "",
-                "markdown_file": str(md_path.relative_to(source_dir)),
+                "markdown_file": relative_to_root(md_path, source_dir),
                 "chars": len(markdown),
                 "lines": len(markdown.splitlines()),
                 "chunks": sum(1 for row in supplemental_chunks if row["doc_id"] == -supplemental_index),
@@ -534,12 +860,31 @@ def search(query: str, kb_path: Path, qa_path: Path | None = None, limit: int = 
     return payload
 
 
+def resolve_kb_paths(
+    kb_dir: Path,
+    kb_path: Path | None = None,
+    qa_path: Path | None = None,
+) -> tuple[Path, Path | None]:
+    kb_dir = kb_dir.resolve()
+    resolved_kb = kb_path.resolve() if kb_path else kb_dir / "markdown_chunks.jsonl"
+    resolved_qa = qa_path.resolve() if qa_path else kb_dir / "qa_overrides.jsonl"
+    return resolved_kb, resolved_qa if resolved_qa.exists() else None
+
+
+def search_kb_dir(query: str, kb_dir: Path, limit: int = 8, qa_path: Path | None = None) -> list[dict[str, Any]]:
+    kb_path, resolved_qa = resolve_kb_paths(kb_dir, qa_path=qa_path)
+    return search(query, kb_path, resolved_qa, limit)
+
+
 def dependency_status() -> dict[str, bool]:
     return {
+        "markitdown": MarkItDown is not None,
         "opencc": OpenCC is not None,
         "pymupdf": fitz is not None,
+        "pdfplumber": pdfplumber is not None,
         "numpy": np is not None,
         "rapidocr": RapidOCR is not None,
+        "windows_ocr_runtime": importlib.util.find_spec("winsdk") is not None,
         "ai_tools_home_exists": AI_TOOLS_HOME.exists(),
     }
 
@@ -554,11 +899,13 @@ def main() -> None:
     build_parser.add_argument("--recursive", action="store_true")
     build_parser.add_argument("--no-ocr", action="store_true")
     build_parser.add_argument("--resume", action="store_true")
+    build_parser.add_argument("--force", action="store_true")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("query")
-    search_parser.add_argument("--kb", default=".pdf_kb/markdown_chunks.jsonl")
-    search_parser.add_argument("--qa", default=".pdf_kb/qa_overrides.jsonl")
+    search_parser.add_argument("--kb-dir", default=".pdf_kb")
+    search_parser.add_argument("--kb")
+    search_parser.add_argument("--qa")
     search_parser.add_argument("--limit", type=int, default=8)
 
     subparsers.add_parser("deps")
@@ -571,10 +918,16 @@ def main() -> None:
             recursive=args.recursive,
             use_ocr=not args.no_ocr,
             resume=args.resume,
+            force=args.force,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "search":
-        result = search(args.query, Path(args.kb), Path(args.qa), args.limit)
+        kb_path, qa_path = resolve_kb_paths(
+            Path(args.kb_dir),
+            Path(args.kb) if args.kb else None,
+            Path(args.qa) if args.qa else None,
+        )
+        result = search(args.query, kb_path, qa_path, args.limit)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "deps":
         print(json.dumps(dependency_status(), ensure_ascii=False, indent=2))
