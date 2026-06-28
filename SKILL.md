@@ -1,13 +1,15 @@
 ---
 name: pdf-kb-builder
-description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, batch MarkItDown-first PDF-to-Markdown conversion, OCR-backed extraction, PDF coverage repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
+description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, batch MarkItDown-first PDF-to-Markdown conversion, reindexing existing Markdown, cross-checking existing Markdown against PDFs, OCR-backed extraction, PDF coverage repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
 ---
 
 # PDF KB Builder
 
 ## Core Rule
 
-Always build from source PDFs before answering. For new or changed PDFs, batch-generate all MarkItDown Markdown bases first, then run the cross-check and repair stage with PyMuPDF, pdfplumber, Windows OCR Runtime API, and RapidOCR.
+Default to building from source PDFs before answering. For new or changed PDFs, batch-generate all MarkItDown Markdown bases first, then run the cross-check and repair stage with PyMuPDF, pdfplumber, Windows OCR Runtime API, and RapidOCR.
+
+If the user explicitly provides or asks to reuse an existing `.pdf_kb/markdown` directory, do not rerun MarkItDown unless requested. Use `reindex` to rebuild manifests, chunks, catalog, and coverage metadata from existing Markdown only. Use `cross-check` when existing Markdown should be repaired against the source PDFs without regenerating the MarkItDown base.
 
 Every response produced by this skill must include source citations. Answers must include sources. For product answers, cite KB search metadata. For build/update/validation work, cite generated artifacts or command evidence such as `.pdf_kb/manifest.json`, `.pdf_kb/catalog.md`, `.pdf_kb/coverage_report.json`, `markdown_chunks.jsonl`, or test/dependency command output. Do not provide a source-free final answer when this skill is used.
 
@@ -17,27 +19,42 @@ When answering from a KB search result, include a concise source citation in the
 
 1. Confirm the source directory that contains PDFs.
 2. Ensure dependencies are available. On Windows, run `scripts/install_windows_dependencies.ps1` if tools are missing.
-3. Build the KB:
+3. Choose the build mode:
+   - Normal source build: use `build`.
+   - Existing Markdown only: use `reindex` or `build --from-existing-markdown`.
+   - Existing Markdown plus PDF coverage repair: use `cross-check`.
+4. Build the KB from source PDFs:
 
 ```powershell
 python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 ```
 
-4. The build pipeline is mandatory:
+5. The source-build pipeline is mandatory:
    - For every new or changed PDF, run MarkItDown first and write the Markdown base.
    - Only after the MarkItDown batch finishes, extract page text with PyMuPDF and pdfplumber.
    - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 页补漏` section.
    - If neither native extractor finds text, run Windows OCR Runtime API first, then RapidOCR only if Windows OCR Runtime API returns no text.
    - Record source coverage in `.pdf_kb/coverage_report.json`.
-5. Include optional curated material:
+6. For existing Markdown workflows:
+   - Use `reindex` when Markdown is already trusted and only indexes need rebuilding.
+   - Use `cross-check` when Markdown already exists but pages still need PyMuPDF/pdfplumber/OCR coverage repair.
+   - Both modes require one existing Markdown file per source PDF under `.pdf_kb/markdown`; missing files should stop the run.
+7. Include optional curated material:
    - Place `qa_overrides.jsonl` under `.pdf_kb/` for high-priority exact answers.
    - Place `00_*.md` under `.pdf_kb/markdown/` for supplemental Markdown indexes.
    - Re-run `build --resume` after adding supplemental files.
-6. Re-run `build` whenever PDFs are added, deleted, or changed. The script synchronizes `.pdf_kb/markdown`, removes generated Markdown for deleted PDFs, reuses unchanged PDFs by hash, regenerates changed PDFs, and rebuilds `markdown_chunks.jsonl`.
-7. Search by KB directory so retrieval stays decoupled from KB content:
+8. Re-run `build` whenever PDFs are added, deleted, or changed. The script synchronizes `.pdf_kb/markdown`, removes generated Markdown for deleted PDFs, reuses unchanged PDFs by hash, regenerates changed PDFs, and rebuilds `markdown_chunks.jsonl`.
+9. Search by KB directory so retrieval stays decoupled from KB content:
 
 ```powershell
 python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查询文字" --kb-dir "D:\path\to\pdf-folder\.pdf_kb"
+```
+
+Existing Markdown commands:
+
+```powershell
+python path\to\pdf-kb-builder\scripts\pdf_kb.py reindex "D:\path\to\pdf-folder" --recursive
+python path\to\pdf-kb-builder\scripts\pdf_kb.py cross-check "D:\path\to\pdf-folder" --recursive
 ```
 
 ## Generated KB Layout
@@ -48,6 +65,8 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查询文字" --kb-dir "
 - `.pdf_kb/catalog.md`: human-readable catalog.
 - `.pdf_kb/coverage_report.json`: MarkItDown status, PyMuPDF/pdfplumber pages, Windows OCR Runtime API pages, RapidOCR pages, repaired pages, and no-text pages.
 - `.pdf_kb/qa_overrides.jsonl`: optional curated answers, searched before chunks.
+
+In existing Markdown modes, manifest entries use `source_type: existing_markdown` or `source_type: existing_markdown_cross_checked`. Coverage entries use `markitdown_status: existing_markdown`; `cross-check` also records `coverage_status: rechecked`.
 
 ## Dependencies
 

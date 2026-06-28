@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import bisect
 import hashlib
 import importlib.util
 import json
@@ -12,6 +13,11 @@ import site
 from pathlib import Path
 from typing import Any
 
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_ROOT.parent
@@ -280,28 +286,10 @@ def heading_for_line(lines: list[str], line_number: int) -> str:
 def make_chunks(markdown: str, size: int = 1500, overlap: int = 220) -> list[dict[str, Any]]:
     lines = markdown.splitlines(keepends=True)
     offsets = line_offsets(lines)
-    spans: list[tuple[int, int, str]] = []
-    position = 0
-
-    while position < len(markdown):
-        match = re.match(r"\s+", markdown[position:])
-        if match:
-            position += len(match.group(0))
-            continue
-        end = position
-        while end < len(markdown) and not markdown[end].isspace():
-            end += 1
-        spans.append((position, end, markdown[position:end]))
-        position = end
+    spans = [(match.start(), match.end(), match.group(0)) for match in re.finditer(r"\S+", markdown)]
 
     def line_for_offset(offset: int) -> int:
-        line = 1
-        for index, value in enumerate(offsets):
-            if value <= offset:
-                line = index + 1
-            else:
-                break
-        return line
+        return max(1, bisect.bisect_right(offsets, offset))
 
     chunks: list[dict[str, Any]] = []
     current_words: list[str] = []
@@ -719,6 +707,14 @@ def collect_supplemental_chunks(root: Path, out: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def discover_source_pdfs(source_dir: Path, out: Path, recursive: bool) -> list[Path]:
+    pdf_pattern = "**/*.pdf" if recursive else "*.pdf"
+    return sorted(
+        [path for path in source_dir.glob(pdf_pattern) if out not in path.parents],
+        key=lambda path: str(path.relative_to(source_dir)).lower(),
+    )
+
+
 def build_kb(
     source_dir: Path,
     *,
@@ -733,11 +729,7 @@ def build_kb(
     markdown_dir = out / "markdown"
     markdown_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_pattern = "**/*.pdf" if recursive else "*.pdf"
-    pdfs = sorted(
-        [path for path in source_dir.glob(pdf_pattern) if out not in path.parents],
-        key=lambda path: str(path.relative_to(source_dir)).lower(),
-    )
+    pdfs = discover_source_pdfs(source_dir, out, recursive)
     previous_manifest = load_json(out / "manifest.json", [])
     previous_coverage = load_json(out / "coverage_report.json", [])
     previous_by_source = {
@@ -879,6 +871,214 @@ def build_kb(
     write_catalog(out / "catalog.md", manifest)
 
     return {"pdfs": len(pdfs), "chunks": len(chunks), "out": str(out)}
+
+
+def reindex_kb_from_markdown(
+    source_dir: Path,
+    *,
+    out_dir: Path | None = None,
+    recursive: bool = False,
+) -> dict[str, Any]:
+    source_dir = source_dir.resolve()
+    out = (out_dir or source_dir / ".pdf_kb").resolve()
+    markdown_dir = out / "markdown"
+    if not markdown_dir.exists():
+        raise FileNotFoundError(f"Markdown directory does not exist: {markdown_dir}")
+
+    pdfs = discover_source_pdfs(source_dir, out, recursive)
+    manifest: list[dict[str, Any]] = []
+    chunks: list[dict[str, Any]] = []
+    coverage: list[dict[str, Any]] = []
+    missing_markdown: list[str] = []
+
+    for doc_id, pdf_path in enumerate(pdfs, start=1):
+        rel_pdf_raw = str(pdf_path.relative_to(source_dir))
+        rel_pdf = to_hk(repair_mojibake(rel_pdf_raw))
+        md_path = markdown_dir / stable_markdown_name(rel_pdf_raw, pdf_path)
+        if not md_path.exists():
+            digest = hashlib.sha1(rel_pdf_raw.replace("\\", "/").encode("utf-8")).hexdigest()[:12]
+            matches = sorted(markdown_dir.glob(f"pdf_{digest}_*.md"))
+            if matches:
+                md_path = matches[0]
+        if not md_path.exists() or md_path.stat().st_size == 0:
+            missing_markdown.append(rel_pdf_raw)
+            continue
+
+        pdf_sha = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+        markdown = md_path.read_text(encoding="utf-8", errors="replace")
+        doc_chunks = make_chunks(markdown)
+        rel_md = relative_to_root(md_path, source_dir)
+        manifest.append(
+            {
+                "doc_id": doc_id,
+                "source_path": rel_pdf_raw,
+                "pdf_file": rel_pdf,
+                "markdown_file": rel_md,
+                "chars": len(markdown),
+                "lines": len(markdown.splitlines()),
+                "chunks": len(doc_chunks),
+                "sha256": pdf_sha,
+                "source_type": "existing_markdown",
+            }
+        )
+        coverage.append(
+            {
+                "doc_id": doc_id,
+                "source_path": rel_pdf_raw,
+                "pdf_file": rel_pdf,
+                "reused_existing_markdown": True,
+                "coverage_status": "not_rechecked",
+                "markitdown_status": "existing_markdown",
+                "markitdown_chars": len(markdown),
+                "markitdown_error": "",
+            }
+        )
+        for chunk_index, chunk in enumerate(doc_chunks, start=1):
+            chunks.append(
+                {
+                    "doc_id": doc_id,
+                    "pdf_file": rel_pdf,
+                    "markdown_file": rel_md,
+                    "chunk": chunk_index,
+                    **chunk,
+                }
+            )
+
+    if missing_markdown:
+        raise FileNotFoundError(
+            "Missing existing Markdown for PDF(s): " + ", ".join(missing_markdown)
+        )
+
+    supplemental_chunks = collect_supplemental_chunks(source_dir, out)
+    chunks.extend(supplemental_chunks)
+    supplemental_files = sorted((out / "markdown").glob("00_*.md"))
+    for supplemental_index, md_path in enumerate(supplemental_files):
+        markdown = md_path.read_text(encoding="utf-8", errors="replace")
+        manifest.append(
+            {
+                "doc_id": -supplemental_index,
+                "pdf_file": "",
+                "markdown_file": relative_to_root(md_path, source_dir),
+                "chars": len(markdown),
+                "lines": len(markdown.splitlines()),
+                "chunks": sum(1 for row in supplemental_chunks if row["doc_id"] == -supplemental_index),
+                "sha256": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+                "source_type": "supplemental_markdown",
+            }
+        )
+
+    write_json(out / "manifest.json", manifest)
+    write_jsonl(out / "markdown_chunks.jsonl", chunks)
+    write_json(out / "coverage_report.json", coverage)
+    write_catalog(out / "catalog.md", manifest)
+
+    return {"pdfs": len(pdfs), "chunks": len(chunks), "out": str(out), "mode": "existing_markdown"}
+
+
+def cross_check_kb_from_markdown(
+    source_dir: Path,
+    *,
+    out_dir: Path | None = None,
+    recursive: bool = False,
+    use_ocr: bool = True,
+) -> dict[str, Any]:
+    source_dir = source_dir.resolve()
+    out = (out_dir or source_dir / ".pdf_kb").resolve()
+    markdown_dir = out / "markdown"
+    if not markdown_dir.exists():
+        raise FileNotFoundError(f"Markdown directory does not exist: {markdown_dir}")
+
+    pdfs = discover_source_pdfs(source_dir, out, recursive)
+    manifest: list[dict[str, Any]] = []
+    chunks: list[dict[str, Any]] = []
+    coverage: list[dict[str, Any]] = []
+    missing_markdown: list[str] = []
+
+    for doc_id, pdf_path in enumerate(pdfs, start=1):
+        rel_pdf_raw = str(pdf_path.relative_to(source_dir))
+        rel_pdf = to_hk(repair_mojibake(rel_pdf_raw))
+        md_path = markdown_dir / stable_markdown_name(rel_pdf_raw, pdf_path)
+        if not md_path.exists():
+            digest = hashlib.sha1(rel_pdf_raw.replace("\\", "/").encode("utf-8")).hexdigest()[:12]
+            matches = sorted(markdown_dir.glob(f"pdf_{digest}_*.md"))
+            if matches:
+                md_path = matches[0]
+        if not md_path.exists() or md_path.stat().st_size == 0:
+            missing_markdown.append(rel_pdf_raw)
+            continue
+
+        existing_markdown = md_path.read_text(encoding="utf-8", errors="replace")
+        stats = repair_markdown_with_cross_check(
+            pdf_path,
+            md_path,
+            markitdown_stats={
+                "markitdown_status": "existing_markdown",
+                "markitdown_chars": len(existing_markdown.strip()),
+                "markitdown_error": "",
+            },
+            use_ocr=use_ocr,
+        )
+        stats["reused_existing_markdown"] = True
+        stats["coverage_status"] = "rechecked"
+
+        pdf_sha = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+        markdown = md_path.read_text(encoding="utf-8", errors="replace")
+        doc_chunks = make_chunks(markdown)
+        rel_md = relative_to_root(md_path, source_dir)
+        manifest.append(
+            {
+                "doc_id": doc_id,
+                "source_path": rel_pdf_raw,
+                "pdf_file": rel_pdf,
+                "markdown_file": rel_md,
+                "chars": len(markdown),
+                "lines": len(markdown.splitlines()),
+                "chunks": len(doc_chunks),
+                "sha256": pdf_sha,
+                "source_type": "existing_markdown_cross_checked",
+            }
+        )
+        coverage.append({"doc_id": doc_id, "source_path": rel_pdf_raw, "pdf_file": rel_pdf, **stats})
+        for chunk_index, chunk in enumerate(doc_chunks, start=1):
+            chunks.append(
+                {
+                    "doc_id": doc_id,
+                    "pdf_file": rel_pdf,
+                    "markdown_file": rel_md,
+                    "chunk": chunk_index,
+                    **chunk,
+                }
+            )
+
+    if missing_markdown:
+        raise FileNotFoundError(
+            "Missing existing Markdown for PDF(s): " + ", ".join(missing_markdown)
+        )
+
+    supplemental_chunks = collect_supplemental_chunks(source_dir, out)
+    chunks.extend(supplemental_chunks)
+    supplemental_files = sorted((out / "markdown").glob("00_*.md"))
+    for supplemental_index, md_path in enumerate(supplemental_files):
+        markdown = md_path.read_text(encoding="utf-8", errors="replace")
+        manifest.append(
+            {
+                "doc_id": -supplemental_index,
+                "pdf_file": "",
+                "markdown_file": relative_to_root(md_path, source_dir),
+                "chars": len(markdown),
+                "lines": len(markdown.splitlines()),
+                "chunks": sum(1 for row in supplemental_chunks if row["doc_id"] == -supplemental_index),
+                "sha256": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+                "source_type": "supplemental_markdown",
+            }
+        )
+
+    write_json(out / "manifest.json", manifest)
+    write_jsonl(out / "markdown_chunks.jsonl", chunks)
+    write_json(out / "coverage_report.json", coverage)
+    write_catalog(out / "catalog.md", manifest)
+
+    return {"pdfs": len(pdfs), "chunks": len(chunks), "out": str(out), "mode": "cross_checked_existing_markdown"}
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -1114,6 +1314,18 @@ def main() -> None:
     build_parser.add_argument("--no-ocr", action="store_true")
     build_parser.add_argument("--resume", action="store_true")
     build_parser.add_argument("--force", action="store_true")
+    build_parser.add_argument("--from-existing-markdown", action="store_true")
+
+    reindex_parser = subparsers.add_parser("reindex")
+    reindex_parser.add_argument("source_dir")
+    reindex_parser.add_argument("--out")
+    reindex_parser.add_argument("--recursive", action="store_true")
+
+    cross_check_parser = subparsers.add_parser("cross-check")
+    cross_check_parser.add_argument("source_dir")
+    cross_check_parser.add_argument("--out")
+    cross_check_parser.add_argument("--recursive", action="store_true")
+    cross_check_parser.add_argument("--no-ocr", action="store_true")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("query")
@@ -1126,13 +1338,35 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "build":
-        result = build_kb(
+        if args.from_existing_markdown:
+            result = reindex_kb_from_markdown(
+                Path(args.source_dir),
+                out_dir=Path(args.out) if args.out else None,
+                recursive=args.recursive,
+            )
+        else:
+            result = build_kb(
+                Path(args.source_dir),
+                out_dir=Path(args.out) if args.out else None,
+                recursive=args.recursive,
+                use_ocr=not args.no_ocr,
+                resume=args.resume,
+                force=args.force,
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "reindex":
+        result = reindex_kb_from_markdown(
+            Path(args.source_dir),
+            out_dir=Path(args.out) if args.out else None,
+            recursive=args.recursive,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "cross-check":
+        result = cross_check_kb_from_markdown(
             Path(args.source_dir),
             out_dir=Path(args.out) if args.out else None,
             recursive=args.recursive,
             use_ocr=not args.no_ocr,
-            resume=args.resume,
-            force=args.force,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "search":

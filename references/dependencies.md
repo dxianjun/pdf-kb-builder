@@ -24,6 +24,8 @@ Windows 使用 `scripts/install_windows_dependencies.ps1` 安装依赖。脚本�
 - Deleted PDF: remove the generated Markdown recorded by the old manifest.
 - Changed PDF: compare SHA-256 and regenerate Markdown.
 - Unchanged PDF: reuse Markdown and rebuild indexes.
+- Existing Markdown reindex: rebuild `manifest.json`, `markdown_chunks.jsonl`, `catalog.md`, and `coverage_report.json` from `.pdf_kb/markdown` without invoking MarkItDown or repair.
+- Existing Markdown cross-check: reuse `.pdf_kb/markdown` as the base and run PyMuPDF/pdfplumber/OCR repair without invoking MarkItDown.
 - Supplemental `00_*.md` files are user-managed and must not be deleted by sync.
 
 ## Bundled Assets

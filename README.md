@@ -70,6 +70,26 @@ python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 - 修改 PDF：根据文件 hash 自动重新转换。
 - 未修改 PDF：直接复用已有 Markdown，只重建索引。
 
+如果已有 `.pdf_kb/markdown`，并且不希望重新调用 MarkItDown，可以基于现有 Markdown 重建索引：
+
+```powershell
+python .\scripts\pdf_kb.py reindex "D:\path\to\pdf-folder" --recursive
+```
+
+等价地，也可以使用：
+
+```powershell
+python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive --from-existing-markdown
+```
+
+如果已有 Markdown 还需要和 PDF 逐页交叉检查并补漏，但仍不想重新生成 MarkItDown 基底：
+
+```powershell
+python .\scripts\pdf_kb.py cross-check "D:\path\to\pdf-folder" --recursive
+```
+
+这两种已有 Markdown 模式要求每个源 PDF 在 `.pdf_kb/markdown` 下已有对应 Markdown；缺少时会停止并提示缺失的 PDF。
+
 默认输出到 PDF 目录下的 `.pdf_kb`：
 
 ```text
@@ -130,6 +150,8 @@ python .\scripts\pdf_kb.py deps
 
 - `catalog.md` 是否列出全部 PDF。
 - `coverage_report.json` 中 `markitdown_status` 是否为 `ok`。
+- 使用已有 Markdown 模式时，`manifest.json` 中 `source_type` 是否为 `existing_markdown` 或 `existing_markdown_cross_checked`。
+- 使用 `cross-check` 时，`coverage_report.json` 中 `coverage_status` 是否为 `rechecked`。
 - `coverage_report.json` 中 `supplemented_pages`、`windows_ocr_pages`、`rapidocr_pages` 是否符合预期。
 - `pdf_kb.py deps` 中 `windows_ocr_runtime_api` 是否显示 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或 `profile_engine` 可用。
 - 新增/删除 PDF 后重新执行 `build`，确认 `.pdf_kb/markdown` 和 `markdown_chunks.jsonl` 已同步。

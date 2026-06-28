@@ -253,6 +253,64 @@ class PdfKbBuilderTests(unittest.TestCase):
 
         self.assertEqual(calls, [b"v1", b"v2"])
 
+    def test_reindex_existing_markdown_does_not_call_markitdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            pdf = root / "policy.pdf"
+            pdf.write_bytes(b"pdf bytes")
+            markdown_dir = root / ".pdf_kb" / "markdown"
+            markdown_dir.mkdir(parents=True)
+            md_path = markdown_dir / pdf_kb.stable_markdown_name("policy.pdf", pdf)
+            md_path.write_text("# policy\n\nexisting searchable markdown\n", encoding="utf-8")
+
+            with (
+                patch.object(pdf_kb, "write_markitdown_base_markdown", side_effect=AssertionError("unexpected MarkItDown")),
+                patch.object(pdf_kb, "repair_markdown_with_cross_check", side_effect=AssertionError("unexpected repair")),
+            ):
+                result = pdf_kb.reindex_kb_from_markdown(root)
+
+            chunks = (root / ".pdf_kb" / "markdown_chunks.jsonl").read_text(encoding="utf-8")
+            manifest = json.loads((root / ".pdf_kb" / "manifest.json").read_text(encoding="utf-8"))
+            coverage = json.loads((root / ".pdf_kb" / "coverage_report.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["mode"], "existing_markdown")
+        self.assertIn("existing searchable markdown", chunks)
+        self.assertEqual(manifest[0]["source_type"], "existing_markdown")
+        self.assertEqual(coverage[0]["markitdown_status"], "existing_markdown")
+
+    def test_cross_check_existing_markdown_does_not_call_markitdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            pdf = root / "policy.pdf"
+            pdf.write_bytes(b"pdf bytes")
+            markdown_dir = root / ".pdf_kb" / "markdown"
+            markdown_dir.mkdir(parents=True)
+            md_path = markdown_dir / pdf_kb.stable_markdown_name("policy.pdf", pdf)
+            md_path.write_text("# policy\n\nexisting searchable markdown\n", encoding="utf-8")
+
+            def fake_repair(pdf_path: Path, md_path: Path, **kwargs: object) -> dict[str, object]:
+                self.assertEqual(pdf_path, pdf)
+                self.assertEqual(kwargs["markitdown_stats"]["markitdown_status"], "existing_markdown")
+                original = md_path.read_text(encoding="utf-8")
+                md_path.write_text(original + "\n## repaired\n\nsupplemented text\n", encoding="utf-8")
+                return {"pages": 1, "supplemented_pages": [1], "markitdown_status": "existing_markdown"}
+
+            with (
+                patch.object(pdf_kb, "write_markitdown_base_markdown", side_effect=AssertionError("unexpected MarkItDown")),
+                patch.object(pdf_kb, "repair_markdown_with_cross_check", fake_repair),
+            ):
+                result = pdf_kb.cross_check_kb_from_markdown(root)
+
+            chunks = (root / ".pdf_kb" / "markdown_chunks.jsonl").read_text(encoding="utf-8")
+            manifest = json.loads((root / ".pdf_kb" / "manifest.json").read_text(encoding="utf-8"))
+            coverage = json.loads((root / ".pdf_kb" / "coverage_report.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["mode"], "cross_checked_existing_markdown")
+        self.assertIn("supplemented text", chunks)
+        self.assertEqual(manifest[0]["source_type"], "existing_markdown_cross_checked")
+        self.assertEqual(coverage[0]["coverage_status"], "rechecked")
+        self.assertEqual(coverage[0]["supplemented_pages"], [1])
+
     def test_search_resolves_paths_from_kb_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             kb_dir = Path(temp_dir) / ".pdf_kb"
