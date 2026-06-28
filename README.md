@@ -1,6 +1,6 @@
 # PDF KB Builder
 
-将指定目录下的 PDF 文件转换成可检索的本地知识库。第一次建库时，流程固定为：先用 MarkItDown 产生 Markdown 基底，再用 PyMuPDF、pdfplumber、Windows OCR、RapidOCR 逐页交叉补漏。
+将指定目录下的 PDF 文件转换成可检索的本地知识库。建库时，流程固定为：先批量用 MarkItDown 为所有新增或变更 PDF 产生 Markdown 基底，再用 PyMuPDF、pdfplumber、Windows OCR、RapidOCR 逐页交叉补漏。
 
 ## 目录结构
 
@@ -42,8 +42,8 @@ python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 
 建库流程：
 
-1. MarkItDown 先把每份 PDF 转成 Markdown。
-2. PyMuPDF 和 pdfplumber 再逐页抽取文字，检查 MarkItDown 是否漏页或漏段。
+1. MarkItDown 先批量把所有新增或变更 PDF 转成 Markdown 基底。
+2. MarkItDown 批量阶段完成后，PyMuPDF 和 pdfplumber 再逐页抽取文字，检查是否漏页或漏段。
 3. 若原生文字抽不到，先跑 Windows OCR。
 4. Windows OCR 没有结果时，才回落 RapidOCR。
 5. 漏抽出的内容会补到 `.pdf_kb/markdown/*.md` 的 `PDF 第 N 页补漏` 区段。

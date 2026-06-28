@@ -120,6 +120,36 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertEqual(stats["markitdown_status"], "ok")
         self.assertEqual(stats["supplemented_pages"], [1])
 
+    def test_build_batches_markitdown_before_cross_checking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first = root / "first.pdf"
+            second = root / "second.pdf"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            calls: list[str] = []
+
+            def fake_markitdown(path: Path) -> str:
+                calls.append(f"markitdown:{path.name}")
+                return f"# {path.stem}\n\nbase {path.stem}\n"
+
+            def fake_pymupdf(path: Path) -> tuple[dict[int, str], int]:
+                calls.append(f"pymupdf:{path.name}")
+                return {1: f"pymupdf {path.stem}"}, 1
+
+            with (
+                patch.object(pdf_kb, "convert_with_markitdown", fake_markitdown, create=True),
+                patch.object(pdf_kb, "extract_pages_with_pymupdf", fake_pymupdf, create=True),
+                patch.object(pdf_kb, "extract_pages_with_pdfplumber", return_value=({}, 0), create=True),
+                patch.object(pdf_kb, "windows_ocr_page", return_value=[], create=True),
+                patch.object(pdf_kb, "rapidocr_page", return_value=[], create=True),
+            ):
+                pdf_kb.build_kb(root)
+
+        self.assertEqual(calls[:2], ["markitdown:first.pdf", "markitdown:second.pdf"])
+        self.assertGreater(calls.index("pymupdf:first.pdf"), calls.index("markitdown:second.pdf"))
+        self.assertGreater(calls.index("pymupdf:second.pdf"), calls.index("markitdown:second.pdf"))
+
     def test_windows_ocr_is_used_before_rapidocr(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -172,12 +202,18 @@ class PdfKbBuilderTests(unittest.TestCase):
             first.write_bytes(b"first")
             second.write_bytes(b"second")
 
-            def fake_pdf_to_markdown(pdf_path: Path, md_path: Path, **_: object) -> dict[str, object]:
+            def fake_write_markitdown_base(pdf_path: Path, md_path: Path) -> dict[str, object]:
                 md_path.parent.mkdir(parents=True, exist_ok=True)
                 md_path.write_text(f"# {pdf_path.stem}\n\nsearchable {pdf_path.stem}\n", encoding="utf-8")
+                return {"markitdown_status": "test", "markitdown_chars": md_path.stat().st_size}
+
+            def fake_repair_cross_check(pdf_path: Path, md_path: Path, **_: object) -> dict[str, object]:
                 return {"pages": 1, "markitdown_status": "test"}
 
-            with patch.object(pdf_kb, "pdf_to_markdown", fake_pdf_to_markdown):
+            with (
+                patch.object(pdf_kb, "write_markitdown_base_markdown", fake_write_markitdown_base),
+                patch.object(pdf_kb, "repair_markdown_with_cross_check", fake_repair_cross_check),
+            ):
                 pdf_kb.build_kb(root)
                 second.unlink()
                 pdf_kb.build_kb(root)
@@ -196,14 +232,20 @@ class PdfKbBuilderTests(unittest.TestCase):
             pdf.write_bytes(b"v1")
             calls: list[bytes] = []
 
-            def fake_pdf_to_markdown(pdf_path: Path, md_path: Path, **_: object) -> dict[str, object]:
+            def fake_write_markitdown_base(pdf_path: Path, md_path: Path) -> dict[str, object]:
                 content = pdf_path.read_bytes()
                 calls.append(content)
                 md_path.parent.mkdir(parents=True, exist_ok=True)
                 md_path.write_text(f"# policy\n\n{content.decode()}\n", encoding="utf-8")
+                return {"markitdown_status": "test", "markitdown_chars": md_path.stat().st_size}
+
+            def fake_repair_cross_check(pdf_path: Path, md_path: Path, **_: object) -> dict[str, object]:
                 return {"pages": 1, "markitdown_status": "test"}
 
-            with patch.object(pdf_kb, "pdf_to_markdown", fake_pdf_to_markdown):
+            with (
+                patch.object(pdf_kb, "write_markitdown_base_markdown", fake_write_markitdown_base),
+                patch.object(pdf_kb, "repair_markdown_with_cross_check", fake_repair_cross_check),
+            ):
                 pdf_kb.build_kb(root)
                 pdf_kb.build_kb(root)
                 pdf.write_bytes(b"v2")

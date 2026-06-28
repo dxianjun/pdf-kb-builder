@@ -1,13 +1,13 @@
 ---
 name: pdf-kb-builder
-description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, MarkItDown-first PDF-to-Markdown conversion, OCR-backed extraction, PDF coverage repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
+description: Use when Codex needs to turn PDFs in a user-specified directory into a searchable local knowledge base, especially for Chinese/traditional-Chinese PDFs, batch MarkItDown-first PDF-to-Markdown conversion, OCR-backed extraction, PDF coverage repair, QA overrides, supplemental indexes, or fast retrieval over PDF training materials.
 ---
 
 # PDF KB Builder
 
 ## Core Rule
 
-Always build from source PDFs before answering. On the first build for a PDF, use MarkItDown first, then cross-check and repair with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR.
+Always build from source PDFs before answering. For new or changed PDFs, batch-generate all MarkItDown Markdown bases first, then run the cross-check and repair stage with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR.
 
 Every response produced by this skill must include source citations. Answers must include sources. For product answers, cite KB search metadata. For build/update/validation work, cite generated artifacts or command evidence such as `.pdf_kb/manifest.json`, `.pdf_kb/catalog.md`, `.pdf_kb/coverage_report.json`, `markdown_chunks.jsonl`, or test/dependency command output. Do not provide a source-free final answer when this skill is used.
 
@@ -25,8 +25,8 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --
 ```
 
 4. The build pipeline is mandatory:
-   - Convert each PDF with MarkItDown and write that as the Markdown base.
-   - Extract page text again with PyMuPDF and pdfplumber.
+   - For every new or changed PDF, run MarkItDown first and write the Markdown base.
+   - Only after the MarkItDown batch finishes, extract page text with PyMuPDF and pdfplumber.
    - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 页补漏` section.
    - If neither native extractor finds text, run Windows OCR first, then RapidOCR only if Windows OCR returns no text.
    - Record source coverage in `.pdf_kb/coverage_report.json`.

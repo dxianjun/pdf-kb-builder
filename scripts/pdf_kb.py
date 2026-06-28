@@ -263,6 +263,18 @@ def pdf_to_markdown(
     zoom: float = 2.0,
     min_text_chars: int = 5,
 ) -> dict[str, Any]:
+    markitdown_stats = write_markitdown_base_markdown(pdf_path, md_path)
+    return repair_markdown_with_cross_check(
+        pdf_path,
+        md_path,
+        markitdown_stats=markitdown_stats,
+        use_ocr=use_ocr,
+        zoom=zoom,
+        min_text_chars=min_text_chars,
+    )
+
+
+def write_markitdown_base_markdown(pdf_path: Path, md_path: Path) -> dict[str, Any]:
     markitdown_error = ""
     try:
         markitdown_text = convert_with_markitdown(pdf_path)
@@ -274,6 +286,54 @@ def pdf_to_markdown(
         markitdown_status = "error"
         markitdown_error = f"{type(exc).__name__}: {exc}"
 
+    lines: list[str] = [
+        f"# {to_hk(repair_mojibake(pdf_path.stem))}",
+        "",
+        f"> Source PDF: `{pdf_path.name}`",
+        "",
+        "## MarkItDown 转换结果",
+        "",
+    ]
+    if markitdown_text.strip():
+        lines.append(markitdown_text.strip())
+        lines.append("")
+    elif markitdown_error:
+        lines.append(f"_MarkItDown 转换失败：{markitdown_error}_")
+        lines.append("")
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
+    return {
+        "markitdown_status": markitdown_status,
+        "markitdown_chars": len(markitdown_text.strip()),
+        "markitdown_error": markitdown_error,
+    }
+
+
+def repair_markdown_with_cross_check(
+    pdf_path: Path,
+    md_path: Path,
+    *,
+    markitdown_stats: dict[str, Any] | None = None,
+    use_ocr: bool = True,
+    zoom: float = 2.0,
+    min_text_chars: int = 5,
+) -> dict[str, Any]:
+    stats = dict(markitdown_stats or {})
+    markdown = md_path.read_text(encoding="utf-8", errors="replace") if md_path.exists() else ""
+    lines = markdown.rstrip().splitlines()
+    if lines:
+        lines.append("")
+    else:
+        lines = [
+            f"# {to_hk(repair_mojibake(pdf_path.stem))}",
+            "",
+            f"> Source PDF: `{pdf_path.name}`",
+            "",
+            "## MarkItDown 转换结果",
+            "",
+        ]
+    base_compact = compact_text(markdown)
     extraction_errors: dict[str, str] = {}
     try:
         pymupdf_pages, pymupdf_page_count = extract_pages_with_pymupdf(pdf_path)
@@ -292,22 +352,6 @@ def pdf_to_markdown(
         default=0,
     )
     rapid_engine = None
-    lines: list[str] = [
-        f"# {to_hk(repair_mojibake(pdf_path.stem))}",
-        "",
-        f"> Source PDF: `{pdf_path.name}`",
-        "",
-        "## MarkItDown 转换结果",
-        "",
-    ]
-    if markitdown_text.strip():
-        lines.append(markitdown_text.strip())
-        lines.append("")
-    elif markitdown_error:
-        lines.append(f"_MarkItDown 转换失败：{markitdown_error}_")
-        lines.append("")
-
-    base_compact = compact_text(markitdown_text)
     pymupdf_text_pages = [
         page_number for page_number, text in pymupdf_pages.items() if useful_text(text, min_text_chars)
     ]
@@ -368,17 +412,15 @@ def pdf_to_markdown(
             }
         )
 
-    if page_count == 0 and not markitdown_text.strip():
+    if page_count == 0 and not compact_text(markdown):
         lines.append("_未能从 MarkItDown、PyMuPDF 或 pdfplumber 抽取内容。_")
         lines.append("")
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
-    return {
+    stats.update(
+        {
         "pages": page_count,
-        "markitdown_status": markitdown_status,
-        "markitdown_chars": len(markitdown_text.strip()),
-        "markitdown_error": markitdown_error,
         "native_text_pages": len(set(pymupdf_text_pages + pdfplumber_text_pages)),
         "pymupdf_text_pages": pymupdf_text_pages,
         "pdfplumber_text_pages": pdfplumber_text_pages,
@@ -389,7 +431,12 @@ def pdf_to_markdown(
         "supplemented_pages": supplemented_pages,
         "page_sources": page_sources,
         "extraction_errors": extraction_errors,
-    }
+        }
+    )
+    stats.setdefault("markitdown_status", "unknown")
+    stats.setdefault("markitdown_chars", 0)
+    stats.setdefault("markitdown_error", "")
+    return stats
 
 
 def convert_with_markitdown(pdf_path: Path) -> str:
@@ -631,6 +678,7 @@ def build_kb(
     manifest: list[dict[str, Any]] = []
     chunks: list[dict[str, Any]] = []
     coverage: list[dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
 
     for doc_id, pdf_path in enumerate(pdfs, start=1):
         rel_pdf_raw = str(pdf_path.relative_to(source_dir))
@@ -648,8 +696,47 @@ def build_kb(
             stats = dict(previous_coverage_by_source.get(rel_pdf_raw, {}))
             stats.update({"reused": True})
         else:
-            stats = pdf_to_markdown(pdf_path, md_path, use_ocr=use_ocr)
-            stats["reused"] = False
+            stats = {}
+        documents.append(
+            {
+                "doc_id": doc_id,
+                "pdf_path": pdf_path,
+                "rel_pdf_raw": rel_pdf_raw,
+                "rel_pdf": rel_pdf,
+                "md_path": md_path,
+                "pdf_sha": pdf_sha,
+                "unchanged": unchanged and not force,
+                "stats": stats,
+            }
+        )
+
+    for document in documents:
+        if document["unchanged"]:
+            continue
+        document["markitdown_stats"] = write_markitdown_base_markdown(
+            document["pdf_path"],
+            document["md_path"],
+        )
+
+    for document in documents:
+        if document["unchanged"]:
+            continue
+        stats = repair_markdown_with_cross_check(
+            document["pdf_path"],
+            document["md_path"],
+            markitdown_stats=document.get("markitdown_stats"),
+            use_ocr=use_ocr,
+        )
+        stats["reused"] = False
+        document["stats"] = stats
+
+    for document in documents:
+        doc_id = document["doc_id"]
+        rel_pdf_raw = document["rel_pdf_raw"]
+        rel_pdf = document["rel_pdf"]
+        md_path = document["md_path"]
+        pdf_sha = document["pdf_sha"]
+        stats = document["stats"]
 
         markdown = md_path.read_text(encoding="utf-8", errors="replace")
         doc_chunks = make_chunks(markdown)
