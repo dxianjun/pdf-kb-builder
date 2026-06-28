@@ -290,6 +290,18 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertIn("line", skill_text)
         self.assertIn("start_line", skill_text)
 
+    def test_windows_installer_skips_existing_python_packages_and_fonts(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn("Get-MissingPythonRequirements", installer_text)
+        self.assertIn("No missing Python dependencies", installer_text)
+        self.assertIn("Install-MissingPythonRequirements", installer_text)
+        self.assertNotIn("pip install --upgrade --target $TargetPath -r $requirements", installer_text)
+        self.assertIn("Test-CjkFontAvailable", installer_text)
+        self.assertIn("At least one common CJK font already exists", installer_text)
+        self.assertIn("Install-WindowsCapabilityIfMissing", installer_text)
+
 
 if __name__ == "__main__":
     unittest.main()

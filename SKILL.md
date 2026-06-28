@@ -56,11 +56,12 @@ Use `scripts/requirements.txt` for Python packages and `scripts/install_windows_
 
 The installer covers:
 
+- Dependency checks before installation. Existing Python imports are skipped; only missing packages are installed to the target path.
 - PDF tools: MarkItDown, PyMuPDF, pdfplumber, pypdf, pypdfium2, reportlab.
 - OCR tools: Windows OCR runtime (`winsdk`), RapidOCR, onnxruntime, opencv-python-headless, Pillow, numpy.
 - Chinese conversion: opencc-python-reimplemented.
-- Windows OCR language capabilities: zh-HK, zh-TW, zh-CN.
-- Windows CJK font capabilities and common font checks.
+- Windows OCR language capabilities: zh-HK, zh-TW, zh-CN, installed only when missing.
+- Windows CJK font checks. Existing common CJK font files are skipped; if none are found, Windows CJK font capabilities are installed when elevation is available.
 
 ## Search Behavior
 

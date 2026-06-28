@@ -27,6 +27,8 @@ Windows 建议把工具依赖安装到 `D:\ai_tools`：
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -TargetPath D:\ai_tools -UpdateUserEnv
 ```
 
+安装脚本会先检测 Python 包、Windows OCR 能力和常见 CJK 字体。已存在的 Python 包和字体会跳过；缺少的 Python 包会安装到 `D:\ai_tools`，缺少 CJK 字体时会自动安装 Windows CJK 字体能力。
+
 如果不想安装 Windows OCR/字体能力，只安装 Python 套件：
 
 ```powershell
