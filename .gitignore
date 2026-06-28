@@ -4,4 +4,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pdf_kb/
+tools/
+assets/rapidocr/
+assets/fonts/*.ttf
+assets/fonts/*.ttc
+*.onnx
 *.tmp
