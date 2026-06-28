@@ -28,8 +28,8 @@ class PdfKbBuilderTests(unittest.TestCase):
             out = root / ".pdf_kb"
             markdown_dir = out / "markdown"
             markdown_dir.mkdir(parents=True)
-            (markdown_dir / "00_補充問答索引.md").write_text(
-                "# 補充問答索引\n\n問題：測試問題\n答案：測試答案\n",
+            (markdown_dir / "00_补充问答索引.md").write_text(
+                "# 补充问答索引\n\n问题：测试问题\n答案：测试答案\n",
                 encoding="utf-8",
             )
 
@@ -37,8 +37,8 @@ class PdfKbBuilderTests(unittest.TestCase):
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0]["doc_id"], 0)
-        self.assertIn("00_補充問答索引.md", chunks[0]["markdown_file"])
-        self.assertIn("測試答案", chunks[0]["text"])
+        self.assertIn("00_补充问答索引.md", chunks[0]["markdown_file"])
+        self.assertIn("测试答案", chunks[0]["text"])
 
     def test_search_prefers_qa_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -55,7 +55,7 @@ class PdfKbBuilderTests(unittest.TestCase):
                         "start_line": 1,
                         "end_line": 2,
                         "heading": "",
-                        "text": "普通內容 測試問題",
+                        "text": "普通内容 测试问题",
                     },
                     ensure_ascii=False,
                 )
@@ -66,10 +66,10 @@ class PdfKbBuilderTests(unittest.TestCase):
                 json.dumps(
                     {
                         "id": "answer",
-                        "product": "測試產品",
-                        "question": "測試問題",
-                        "aliases": ["測試問題"],
-                        "answer": "QA 優先答案",
+                        "product": "测试产品",
+                        "question": "测试问题",
+                        "aliases": ["测试问题"],
+                        "answer": "QA 优先答案",
                         "sources": [],
                     },
                     ensure_ascii=False,
@@ -78,10 +78,10 @@ class PdfKbBuilderTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            results = pdf_kb.search("測試問題", kb, qa, limit=1)
+            results = pdf_kb.search("测试问题", kb, qa, limit=1)
 
         self.assertEqual(results[0]["source_type"], "qa_override")
-        self.assertEqual(results[0]["answer"], "QA 優先答案")
+        self.assertEqual(results[0]["answer"], "QA 优先答案")
 
     def test_pdf_to_markdown_runs_markitdown_before_cross_checking(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

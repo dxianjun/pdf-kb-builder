@@ -52,14 +52,14 @@ MIN_QA_SCORE = 180
 
 
 VARIANT_REPLACEMENTS = {
-    "糖ji": "糖癒",
-    "糖疾": "糖癒",
-    "心疾": "心癒",
+    "糖ji": "糖愈",
+    "糖疾": "糖愈",
+    "心疾": "心愈",
     "自主人生": "智主人生",
-    "墊底費": "自付費",
+    "垫底费": "自付费",
     "百份比": "百分比",
-    "嵗": "歲",
-    "歳": "歲",
+    "\u5d57": "岁",
+    "\u6b73": "岁",
 }
 
 
@@ -297,14 +297,14 @@ def pdf_to_markdown(
         "",
         f"> Source PDF: `{pdf_path.name}`",
         "",
-        "## MarkItDown 轉換結果",
+        "## MarkItDown 转换结果",
         "",
     ]
     if markitdown_text.strip():
         lines.append(markitdown_text.strip())
         lines.append("")
     elif markitdown_error:
-        lines.append(f"_MarkItDown 轉換失敗：{markitdown_error}_")
+        lines.append(f"_MarkItDown 转换失败：{markitdown_error}_")
         lines.append("")
 
     base_compact = compact_text(markitdown_text)
@@ -349,7 +349,7 @@ def pdf_to_markdown(
         page_compact = compact_text(page_text)
         already_in_markitdown = bool(page_compact and page_compact in base_compact)
         if page_text and not already_in_markitdown:
-            lines.append(f"## PDF 第 {page_number} 頁補漏（{source}）")
+            lines.append(f"## PDF 第 {page_number} 页补漏（{source}）")
             lines.append("")
             lines.append(normalize_markdown(page_text).strip())
             lines.append("")
@@ -369,7 +369,7 @@ def pdf_to_markdown(
         )
 
     if page_count == 0 and not markitdown_text.strip():
-        lines.append("_未能從 MarkItDown、PyMuPDF 或 pdfplumber 抽取內容。_")
+        lines.append("_未能从 MarkItDown、PyMuPDF 或 pdfplumber 抽取内容。_")
         lines.append("")
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
