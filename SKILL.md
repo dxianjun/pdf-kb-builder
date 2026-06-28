@@ -9,6 +9,10 @@ description: Use when Codex needs to turn PDFs in a user-specified directory int
 
 Always build from source PDFs before answering. On the first build for a PDF, use MarkItDown first, then cross-check and repair with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR.
 
+凡是用這個技能產生的回覆都必須附來源。回答必須附來源。For product answers, cite KB search metadata. For build/update/validation work, cite generated artifacts or command evidence such as `.pdf_kb/manifest.json`, `.pdf_kb/catalog.md`, `.pdf_kb/coverage_report.json`, `markdown_chunks.jsonl`, or test/dependency command output. Do not provide a source-free final answer when this skill is used.
+
+When answering from a KB search result, include a concise source citation in the answer. For `qa_override` results, cite each relevant `sources[].markdown_file`, `sources[].line`, and short `quote`. For Markdown chunk results, cite `markdown_file`, `start_line`, `end_line`, and `pdf_file` when available. If no source metadata is available, say that the answer is not sufficiently traceable and re-run search or inspect the Markdown before answering.
+
 ## Workflow
 
 1. Confirm the source directory that contains PDFs.
@@ -60,9 +64,11 @@ The installer covers:
 
 ## Search Behavior
 
+- Any response produced while using this skill must include a source or verification basis.
 - QA overrides are intentionally high priority.
 - Supplemental `00_*.md` files are indexed as `doc_id: 0`, `-1`, etc.
 - Search code lives in the skill script; KB files contain only generated content and indexes. Updating the KB does not require changing the skill package.
+- Every KB-backed answer must include source file and line metadata: `markdown_file` plus `line` for QA overrides, or `markdown_file` plus `start_line`/`end_line` for chunks.
 - Chunk search is lexical and deterministic; for ambiguous product names, prefer adding narrow QA overrides with source line citations.
 
 ## Validation

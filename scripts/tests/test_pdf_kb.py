@@ -238,6 +238,16 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertEqual(results[0]["source_type"], "markdown_chunk")
         self.assertIn("alpha searchable", results[0]["text"])
 
+    def test_skill_requires_source_citations_for_kb_answers(self) -> None:
+        skill_path = Path(__file__).resolve().parents[2] / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("凡是用這個技能", skill_text)
+        self.assertIn("回答必須附來源", skill_text)
+        self.assertIn("markdown_file", skill_text)
+        self.assertIn("line", skill_text)
+        self.assertIn("start_line", skill_text)
+
 
 if __name__ == "__main__":
     unittest.main()

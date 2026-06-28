@@ -81,6 +81,15 @@ python .\scripts\pdf_kb.py search "查詢內容" --kb ".pdf_kb\markdown_chunks.j
 
 建議優先使用 `--kb-dir`，讓搜索能力和知識庫內容解耦；更新知識庫時只改 `.pdf_kb` 產物，不需要修改技能包或搜索腳本。
 
+## 回答來源規則
+
+凡是用這個技能產生的回覆都必須附來源：
+
+- 命中 `qa_override`：附 `sources[].markdown_file`、`sources[].line` 和簡短 `quote`。
+- 命中普通 chunk：附 `markdown_file`、`start_line`、`end_line`，可同時附 `pdf_file`。
+- 建庫、更新、修補或驗證時：附 `.pdf_kb/manifest.json`、`.pdf_kb/catalog.md`、`.pdf_kb/coverage_report.json`、`markdown_chunks.jsonl` 或命令輸出作為依據。
+- 如果沒有來源欄位，不應直接給確定答案；先重新搜索或打開 Markdown 核對。
+
 ## 補充內容
 
 - `qa_overrides.jsonl`：放在 `.pdf_kb/`，用於高優先級標準答案。
