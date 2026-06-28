@@ -315,9 +315,93 @@ class PdfKbBuilderTests(unittest.TestCase):
         installer_text = installer_path.read_text(encoding="utf-8")
 
         self.assertIn("PDF_KB_INSTALL_TARGET", installer_text)
-        self.assertIn("os.environ['PDF_KB_INSTALL_TARGET']", installer_text)
+        self.assertIn("PDF_KB_INSTALL_PATHS", installer_text)
+        self.assertIn("os.environ.get('PDF_KB_INSTALL_PATHS'", installer_text)
         self.assertNotIn('os.environ["PDF_KB_INSTALL_TARGET"]', installer_text)
         self.assertNotIn('sys.path.insert(0, r"$TargetPath")', installer_text)
+
+    def test_windows_installer_validates_rapidocr_engine_symbol(self) -> None:
+        scripts_dir = Path(__file__).resolve().parents[1]
+        installer_text = (scripts_dir / "install_windows_dependencies.ps1").read_text(encoding="utf-8")
+        requirements_text = (scripts_dir / "requirements.txt").read_text(encoding="utf-8")
+
+        self.assertIn("rapidocr_onnxruntime", requirements_text)
+        self.assertIn('"rapidocr_onnxruntime" = @("rapidocr_onnxruntime:RapidOCR")', installer_text)
+        self.assertNotIn("spec_in_target", installer_text)
+        self.assertIn("getattr(module, part)", installer_text)
+
+    def test_windows_installer_checks_combined_dependency_sources(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn("PDF_KB_INSTALL_PATHS", installer_text)
+        self.assertIn("Get-DependencySearchPaths", installer_text)
+        self.assertIn(r"D:\ai_tools", installer_text)
+        self.assertIn("AI_TOOLS_HOME", installer_text)
+
+    def test_windows_installer_defaults_to_skill_owned_tools_directory(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn('[string]$TargetPath = ""', installer_text)
+        self.assertIn('Join-Path $skillRoot "tools"', installer_text)
+        self.assertNotIn("Assert-OwnedToolsPath", installer_text)
+        self.assertNotIn("TargetPath must be the skill-owned tools directory", installer_text)
+        self.assertNotIn('[string]$TargetPath = "D:\\ai_tools"', installer_text)
+
+    def test_windows_installer_uninstall_only_removes_skill_owned_tools(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$Uninstall", installer_text)
+        self.assertIn("Uninstall-OwnedTools", installer_text)
+        self.assertIn("Remove-UserPathEntry", installer_text)
+        self.assertIn('Join-Path $skillRoot "tools"', installer_text)
+        self.assertIn("PDF_KB_TOOLS_HOME", installer_text)
+        self.assertNotIn("Remove-Item -LiteralPath $TargetPath -Recurse", installer_text)
+
+    def test_windows_installer_updates_pdf_kb_tools_home_and_user_path_only(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn('SetEnvironmentVariable("PDF_KB_TOOLS_HOME"', installer_text)
+        self.assertIn("Add-UserPathEntry", installer_text)
+        self.assertIn("Path", installer_text)
+        self.assertNotIn('SetEnvironmentVariable("AI_TOOLS_HOME"', installer_text)
+
+    def test_runtime_uses_skill_tools_ai_tools_and_global_packages(self) -> None:
+        runtime_path = Path(__file__).resolve().parents[1] / "pdf_kb.py"
+        runtime_text = runtime_path.read_text(encoding="utf-8")
+
+        self.assertIn("DEFAULT_TOOLS_HOME", runtime_text)
+        self.assertIn("PDF_KB_TOOLS_HOME", runtime_text)
+        self.assertIn("pdf_kb_tools_home_exists", runtime_text)
+        self.assertIn("DEFAULT_AI_TOOLS_HOME", runtime_text)
+        self.assertIn(r'D:\ai_tools', runtime_text)
+        self.assertIn("ai_tools_home_exists", runtime_text)
+
+    def test_runtime_supports_rapidocr_onnxruntime_fallback(self) -> None:
+        runtime_path = Path(__file__).resolve().parents[1] / "pdf_kb.py"
+        runtime_text = runtime_path.read_text(encoding="utf-8")
+
+        self.assertIn("from rapidocr_onnxruntime import RapidOCR", runtime_text)
+
+    def test_dependency_docs_allow_explicit_target_and_bound_uninstall(self) -> None:
+        skill_root = Path(__file__).resolve().parents[2]
+        docs = "\n".join(
+            [
+                (skill_root / "README.md").read_text(encoding="utf-8"),
+                (skill_root / "SKILL.md").read_text(encoding="utf-8"),
+                (skill_root / "references" / "dependencies.md").read_text(encoding="utf-8"),
+            ]
+        )
+
+        self.assertIn("Explicit -TargetPath may be used", docs)
+        self.assertIn("system/global Python packages, D:\\ai_tools, and the skill tools directory", docs)
+        self.assertIn("-Uninstall", docs)
+        self.assertIn("only removes the skill-owned default tools directory", docs)
+        self.assertIn("do not overwrite AI_TOOLS_HOME", docs)
+        self.assertIn("Fresh install verification must delete the skill-owned tools directory", docs)
 
     def test_dependency_status_reports_windows_ocr_runtime_api(self) -> None:
         status = pdf_kb.dependency_status()

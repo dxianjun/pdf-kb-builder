@@ -1,8 +1,10 @@
 param(
-    [string]$TargetPath = "D:\ai_tools",
+    [string]$TargetPath = "",
     [string]$Python = "python",
+    [switch]$Uninstall,
     [switch]$SkipWindowsCapabilities,
-    [switch]$UpdateUserEnv
+    [switch]$UpdateUserEnv,
+    [switch]$SkipUserEnv
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,11 +21,143 @@ $pythonImportMap = @{
     "pypdf" = @("pypdf")
     "pdfplumber" = @("pdfplumber")
     "pypdfium2" = @("pypdfium2")
-    "rapidocr" = @("rapidocr")
+    "rapidocr_onnxruntime" = @("rapidocr_onnxruntime:RapidOCR")
     "onnxruntime" = @("onnxruntime")
     "opencv-python-headless" = @("cv2")
     "pillow" = @("PIL")
     "numpy" = @("numpy")
+}
+
+function Resolve-InstallTargetPath {
+    param([string]$RequestedPath)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $RequestedPath = Get-OwnedToolsPath
+    }
+    return [System.IO.Path]::GetFullPath($RequestedPath)
+}
+
+function Get-OwnedToolsPath {
+    return [System.IO.Path]::GetFullPath((Join-Path $skillRoot "tools"))
+}
+
+function Add-UniquePath {
+    param(
+        [System.Collections.Generic.List[string]]$Paths,
+        [string]$PathToAdd
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathToAdd)) {
+        return
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($PathToAdd)
+    foreach ($existing in $Paths) {
+        if (Test-IsSamePath $existing $fullPath) {
+            return
+        }
+    }
+    $Paths.Add($fullPath) | Out-Null
+}
+
+function Get-DependencySearchPaths {
+    $paths = New-Object System.Collections.Generic.List[string]
+    Add-UniquePath $paths $TargetPath
+    Add-UniquePath $paths "D:\ai_tools"
+
+    foreach ($scope in @("Process", "User", "Machine")) {
+        $aiToolsHome = [Environment]::GetEnvironmentVariable("AI_TOOLS_HOME", $scope)
+        Add-UniquePath $paths $aiToolsHome
+    }
+
+    return @($paths)
+}
+
+function Test-IsSamePath {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftFull = [System.IO.Path]::GetFullPath($Left).TrimEnd("\")
+    $rightFull = [System.IO.Path]::GetFullPath($Right).TrimEnd("\")
+    return [string]::Equals($leftFull, $rightFull, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Add-UserPathEntry {
+    param([string]$PathToAdd)
+
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $entries = @()
+    if ($currentPath) {
+        $entries = $currentPath -split ";" | Where-Object { $_.Trim() }
+    }
+
+    foreach ($entry in $entries) {
+        if (Test-IsSamePath $entry $PathToAdd) {
+            Write-Host "User Path already contains $PathToAdd"
+            return
+        }
+    }
+
+    $newPath = if ($currentPath) { "$currentPath;$PathToAdd" } else { $PathToAdd }
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    Write-Host "Added $PathToAdd to user Path"
+}
+
+function Remove-UserPathEntry {
+    param([string]$PathToRemove)
+
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not $currentPath) {
+        return
+    }
+
+    $keptEntries = New-Object System.Collections.Generic.List[string]
+    $removed = $false
+    foreach ($entry in ($currentPath -split ";")) {
+        $trimmed = $entry.Trim()
+        if (-not $trimmed) {
+            continue
+        }
+        if (Test-IsSamePath $trimmed $PathToRemove) {
+            $removed = $true
+            continue
+        }
+        $keptEntries.Add($trimmed) | Out-Null
+    }
+
+    if ($removed) {
+        [Environment]::SetEnvironmentVariable("Path", ($keptEntries -join ";"), "User")
+        Write-Host "Removed $PathToRemove from user Path"
+    }
+}
+
+function Uninstall-OwnedTools {
+    $ownedTools = Get-OwnedToolsPath
+    $expectedTools = [System.IO.Path]::GetFullPath((Join-Path $skillRoot "tools"))
+    if (-not (Test-IsSamePath $ownedTools $expectedTools)) {
+        throw "Refusing to uninstall unexpected tools path: $ownedTools"
+    }
+
+    if (Test-Path -LiteralPath $ownedTools) {
+        Remove-Item -LiteralPath $ownedTools -Recurse -Force
+        Write-Host "Removed skill-owned tools directory: $ownedTools"
+    }
+    else {
+        Write-Host "Skill-owned tools directory does not exist: $ownedTools"
+    }
+
+    $currentToolsHome = [Environment]::GetEnvironmentVariable("PDF_KB_TOOLS_HOME", "User")
+    if ($currentToolsHome -and (Test-IsSamePath $currentToolsHome $ownedTools)) {
+        [Environment]::SetEnvironmentVariable("PDF_KB_TOOLS_HOME", $null, "User")
+        Write-Host "Removed user PDF_KB_TOOLS_HOME"
+    }
+    elseif ($currentToolsHome) {
+        Write-Host "Leaving user PDF_KB_TOOLS_HOME unchanged: $currentToolsHome"
+    }
+
+    Remove-UserPathEntry $ownedTools
 }
 
 function Get-RequirementName {
@@ -45,8 +179,10 @@ function Invoke-PythonWithInstallTarget {
     param([string]$Code)
 
     $previousTarget = $env:PDF_KB_INSTALL_TARGET
+    $previousSearchPaths = $env:PDF_KB_INSTALL_PATHS
     try {
         $env:PDF_KB_INSTALL_TARGET = $TargetPath
+        $env:PDF_KB_INSTALL_PATHS = (Get-DependencySearchPaths) -join [System.IO.Path]::PathSeparator
         & $Python -c $Code
         return $LASTEXITCODE
     }
@@ -57,6 +193,13 @@ function Invoke-PythonWithInstallTarget {
         else {
             $env:PDF_KB_INSTALL_TARGET = $previousTarget
         }
+
+        if ($null -eq $previousSearchPaths) {
+            Remove-Item Env:\PDF_KB_INSTALL_PATHS -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PDF_KB_INSTALL_PATHS = $previousSearchPaths
+        }
     }
 }
 
@@ -66,11 +209,28 @@ function Test-PythonImports {
     $moduleList = ConvertTo-PythonListLiteral $Imports
     $check = @"
 import importlib.util
+import importlib
 import os
 import sys
-sys.path.insert(0, os.environ['PDF_KB_INSTALL_TARGET'])
-modules = $moduleList
-missing = [module for module in modules if importlib.util.find_spec(module) is None]
+for path in reversed([p for p in os.environ.get('PDF_KB_INSTALL_PATHS', '').split(os.pathsep) if p]):
+    if os.path.isdir(path):
+        sys.path.insert(0, path)
+checks = $moduleList
+
+missing = []
+for check in checks:
+    module_name, _, attr_path = check.partition(':')
+    spec = importlib.util.find_spec(module_name)
+    if spec is None:
+        missing.append(check)
+        continue
+    if attr_path:
+        try:
+            module = importlib.import_module(module_name)
+            for part in attr_path.split('.'):
+                module = getattr(module, part)
+        except Exception:
+            missing.append(check)
 raise SystemExit(1 if missing else 0)
 "@
     return (Invoke-PythonWithInstallTarget $check) -eq 0
@@ -229,7 +389,9 @@ function Test-WindowsOcrRuntime {
     $check = @"
 import os
 import sys
-sys.path.insert(0, os.environ['PDF_KB_INSTALL_TARGET'])
+for path in reversed([p for p in os.environ.get('PDF_KB_INSTALL_PATHS', '').split(os.pathsep) if p]):
+    if os.path.isdir(path):
+        sys.path.insert(0, path)
 try:
     import winsdk.windows.globalization as win_globalization
     import winsdk.windows.media.ocr as win_ocr
@@ -305,6 +467,14 @@ function Test-CjkFontAvailable {
     return $found
 }
 
+if ($Uninstall) {
+    Uninstall-OwnedTools
+    Write-Host "Done"
+    return
+}
+
+$TargetPath = Resolve-InstallTargetPath $TargetPath
+
 New-Item -ItemType Directory -Force -Path $TargetPath | Out-Null
 Install-BundledRapidOcrModels
 Install-BundledFonts
@@ -312,9 +482,10 @@ Install-BundledFonts
 $missingRequirements = Get-MissingPythonRequirements $requirements
 Install-MissingPythonRequirements $missingRequirements
 
-if ($UpdateUserEnv) {
-    [Environment]::SetEnvironmentVariable("AI_TOOLS_HOME", $TargetPath, "User")
-    Write-Host "Set user AI_TOOLS_HOME=$TargetPath"
+if (-not $SkipUserEnv) {
+    [Environment]::SetEnvironmentVariable("PDF_KB_TOOLS_HOME", $TargetPath, "User")
+    Write-Host "Set user PDF_KB_TOOLS_HOME=$TargetPath"
+    Add-UserPathEntry $TargetPath
 }
 
 $ocrCapabilities = Get-BundledWindowsOcrCapabilities
@@ -368,7 +539,7 @@ else {
 }
 
 Write-Host "Validating Python imports"
-$validationImports = @("fitz", "markitdown", "pypdf", "pdfplumber", "rapidocr", "opencc", "PIL", "numpy", "winsdk")
+$validationImports = @("fitz", "markitdown", "pypdf", "pdfplumber", "rapidocr_onnxruntime:RapidOCR", "opencc", "PIL", "numpy", "winsdk")
 if (-not (Test-PythonImports $validationImports)) {
     throw "Dependency validation failed"
 }

@@ -20,28 +20,30 @@ pdf-kb-builder/
     fonts/NotoSansSC-VF.ttf
     rapidocr/models/*.onnx
     windows-ocr/capabilities.json
+  tools/                  # 安装脚本创建，放本技能自己的依赖；不提交
 ```
 
 ## 安装依赖
 
-Windows 建议把工具依赖安装到 `D:\ai_tools`：
+Windows 安装脚本默认会在技能包自己的目录下创建 `tools`，并把缺少的 Python 包、RapidOCR 模型和随包字体安装/复制到这个目录。安装到 `D:\ai_tools\pdf-kb\pdf-kb-builder` 后，默认补缺目录就是 `D:\ai_tools\pdf-kb\pdf-kb-builder\tools`。如需明确安装到其他目录，可以使用 `-TargetPath`；这不是“必须使用技能内 tools”的硬性限制。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -TargetPath D:\ai_tools -UpdateUserEnv
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1
 ```
 
-安装脚本会先复制随包 RapidOCR 模型和随包 CJK 字体，目标目录已有同名文件则跳过；再检测 Python 包，只把缺少的包安装到 `D:\ai_tools`。Windows OCR 以 Runtime API 实测为准：能通过 `winsdk` 调用 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或用户语言 profile engine 时，即视为可用，不再查询或安装 OCR capability。只有 Runtime API 不可用且当前 PowerShell 有管理员权限时，才尝试安装 Windows OCR capability。
+安装脚本会先复制随包 RapidOCR 模型和随包 CJK 字体，`tools` 中已有同名文件则跳过；再用“系统/全局 Python 包 + `D:\ai_tools` + `AI_TOOLS_HOME` + 技能 `tools`”联合检查 Python 包，只把仍然缺少的包安装到目标目录。运行时也会把这些位置一起加入可用依赖来源，所以可以调用系统全局包和 `D:\ai_tools` 里的已有包。脚本默认设置用户环境变量 `PDF_KB_TOOLS_HOME` 并把目标目录追加到用户 `Path`。它不会删除或覆盖 `D:\ai_tools` 根目录下原有的工具包，也不会把 `AI_TOOLS_HOME` 改成别的值。卸载时使用 `-Uninstall`；脚本只删除技能包默认的 `tools` 目录，并且只清理指向该目录的 `PDF_KB_TOOLS_HOME` / `Path`，不会删除自定义 `-TargetPath` 或 `D:\ai_tools` 中的其他工具。
+
+Windows OCR 以 Runtime API 实测为准：能通过 `winsdk` 调用 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或用户语言 profile engine 时，即视为可用，不再查询或安装 OCR capability。只有 Runtime API 不可用且当前 PowerShell 有管理员权限时，才尝试安装 Windows OCR capability。
 
 如果不想安装 Windows OCR/字体 capability，只安装/复制本技能包可处理的依赖：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -TargetPath D:\ai_tools -SkipWindowsCapabilities
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -SkipWindowsCapabilities
 ```
 
 ## 建立知识库
 
 ```powershell
-$env:AI_TOOLS_HOME = "D:\ai_tools"
 python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 ```
 
@@ -107,8 +109,12 @@ python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --resume
 
 ## 验证
 
+验证安装逻辑时，不要只在已有 `tools` 目录上重复跑。应先用 `-Uninstall` 删除本技能默认的 `tools`，再重新执行安装脚本；这能确认系统/全局 Python 包、`D:\ai_tools`、`AI_TOOLS_HOME` 和重新创建的技能 `tools` 会被联合检查，并且缺少的包才会补装。这个验证只允许删除本技能自己的 `tools`，不能删除 `D:\ai_tools` 根目录或其中已有工具。
+
 ```powershell
 python -m unittest discover -s .\scripts\tests
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -Uninstall
+powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -SkipWindowsCapabilities
 python .\scripts\pdf_kb.py deps
 ```
 

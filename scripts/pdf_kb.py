@@ -12,9 +12,35 @@ from pathlib import Path
 from typing import Any
 
 
-AI_TOOLS_HOME = Path(os.environ.get("AI_TOOLS_HOME", r"D:\ai_tools"))
-if AI_TOOLS_HOME.exists():
-    sys.path.insert(0, str(AI_TOOLS_HOME))
+SCRIPT_ROOT = Path(__file__).resolve().parent
+SKILL_ROOT = SCRIPT_ROOT.parent
+DEFAULT_TOOLS_HOME = SKILL_ROOT / "tools"
+DEFAULT_AI_TOOLS_HOME = Path(r"D:\ai_tools")
+PDF_KB_TOOLS_HOME = Path(os.environ.get("PDF_KB_TOOLS_HOME", str(DEFAULT_TOOLS_HOME)))
+
+
+def add_unique_dependency_path(paths: list[Path], path: Path | None) -> None:
+    if path is None:
+        return
+    full_path = path.expanduser().resolve()
+    if not any(existing == full_path for existing in paths):
+        paths.append(full_path)
+
+
+def dependency_search_paths() -> list[Path]:
+    paths: list[Path] = []
+    add_unique_dependency_path(paths, PDF_KB_TOOLS_HOME)
+    add_unique_dependency_path(paths, DEFAULT_AI_TOOLS_HOME)
+    ai_tools_home = os.environ.get("AI_TOOLS_HOME")
+    if ai_tools_home:
+        add_unique_dependency_path(paths, Path(ai_tools_home))
+    return paths
+
+
+DEPENDENCY_SEARCH_PATHS = dependency_search_paths()
+for dependency_path in reversed(DEPENDENCY_SEARCH_PATHS):
+    if dependency_path.exists():
+        sys.path.insert(0, str(dependency_path))
 
 try:
     from opencc import OpenCC  # type: ignore
@@ -44,7 +70,10 @@ except Exception:  # pragma: no cover
 try:
     from rapidocr import RapidOCR  # type: ignore
 except Exception:  # pragma: no cover
-    RapidOCR = None  # type: ignore
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+    except Exception:
+        RapidOCR = None  # type: ignore
 
 
 HK_CONVERTER = OpenCC("s2hk") if OpenCC else None
@@ -1006,7 +1035,11 @@ def dependency_status() -> dict[str, Any]:
         "rapidocr": RapidOCR is not None,
         "windows_ocr_runtime": importlib.util.find_spec("winsdk") is not None,
         "windows_ocr_runtime_api": windows_ocr_runtime_api_status(),
-        "ai_tools_home_exists": AI_TOOLS_HOME.exists(),
+        "pdf_kb_tools_home": str(PDF_KB_TOOLS_HOME),
+        "pdf_kb_tools_home_exists": PDF_KB_TOOLS_HOME.exists(),
+        "ai_tools_home": str(DEFAULT_AI_TOOLS_HOME),
+        "ai_tools_home_exists": DEFAULT_AI_TOOLS_HOME.exists(),
+        "dependency_search_paths": [str(path) for path in DEPENDENCY_SEARCH_PATHS],
     }
 
 

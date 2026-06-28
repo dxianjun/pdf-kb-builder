@@ -20,7 +20,6 @@ When answering from a KB search result, include a concise source citation in the
 3. Build the KB:
 
 ```powershell
-$env:AI_TOOLS_HOME = "D:\ai_tools"
 python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 ```
 
@@ -56,11 +55,14 @@ Use `scripts/requirements.txt` for Python packages and `scripts/install_windows_
 
 The installer covers:
 
-- Dependency checks before installation. Existing Python imports are skipped; only missing packages are installed to the target path.
+- Dependency checks before installation. Check system/global Python packages, D:\ai_tools, and the skill tools directory together before installing. If any dependency is already importable from those sources, skip reinstalling it. The default install target is the skill-owned `tools` directory next to `SKILL.md`, used only to fill missing dependencies. Explicit -TargetPath may be used when the user intentionally wants another dependency directory; the skill is not required to use only the internal `tools` directory.
 - PDF tools: MarkItDown, PyMuPDF, pdfplumber, pypdf, pypdfium2.
 - OCR tools: Windows OCR Runtime API via `winsdk`, RapidOCR, onnxruntime, opencv-python-headless, Pillow, numpy.
 - Chinese conversion: opencc-python-reimplemented.
-- Bundled assets: RapidOCR ONNX models and an open CJK fallback font are copied from `assets/` to the target tool directory when missing.
+- Bundled assets: RapidOCR ONNX models and an open CJK fallback font are copied from `assets/` to the target dependency directory when missing.
+- Runtime dependency resolution: make system/global Python packages, `D:\ai_tools`, `AI_TOOLS_HOME`, and `PDF_KB_TOOLS_HOME` all available for imports. Prefer the skill target for newly installed missing packages, but allow existing global/shared packages to satisfy dependencies.
+- Environment isolation: the installer sets `PDF_KB_TOOLS_HOME` and appends the target dependency directory to user `Path`; do not overwrite AI_TOOLS_HOME and do not delete from the `D:\ai_tools` root.
+- Uninstall boundary: `-Uninstall` only removes the skill-owned default tools directory next to `SKILL.md`, and only removes user environment entries that point to that exact directory. It must not delete a custom `-TargetPath`, the `D:\ai_tools` root, or any previously existing external tools.
 - Windows OCR availability is validated through the OCR Runtime API (`zh-Hant-HK`, `zh-Hant-TW`, `zh-Hans-CN`, and user profile engine). Use Windows capability installation only as an elevated fallback when the runtime probe fails.
 - Windows CJK font checks. Existing common CJK font files or bundled fallback fonts are skipped; if none are found, Windows CJK font capabilities are installed when elevation is available.
 
@@ -75,10 +77,14 @@ The installer covers:
 
 ## Validation
 
+Fresh install verification must delete the skill-owned tools directory before rerunning the Windows installer. Use `scripts/install_windows_dependencies.ps1 -Uninstall` or a guarded deletion that verifies the resolved path is exactly the `tools` directory next to `SKILL.md`; never delete `D:\ai_tools` or any external dependency directory for this verification. After deleting `tools`, rerun the installer and confirm dependency checks consider system/global Python packages, `D:\ai_tools`, `AI_TOOLS_HOME`, and the recreated skill tools directory together.
+
 Run these before saying the KB is ready:
 
 ```powershell
 python -m unittest discover -s path\to\pdf-kb-builder\scripts\tests
+powershell -ExecutionPolicy Bypass -File path\to\pdf-kb-builder\scripts\install_windows_dependencies.ps1 -Uninstall
+powershell -ExecutionPolicy Bypass -File path\to\pdf-kb-builder\scripts\install_windows_dependencies.ps1 -SkipWindowsCapabilities
 python path\to\pdf-kb-builder\scripts\pdf_kb.py deps
 python path\to\pdf-kb-builder\scripts\pdf_kb.py search "known query" --kb ".pdf_kb\markdown_chunks.jsonl"
 ```

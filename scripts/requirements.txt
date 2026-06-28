@@ -5,7 +5,7 @@ pymupdf
 pypdf
 pdfplumber
 pypdfium2
-rapidocr
+rapidocr_onnxruntime
 onnxruntime
 opencv-python-headless
 pillow
