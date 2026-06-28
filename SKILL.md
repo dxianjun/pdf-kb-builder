@@ -27,7 +27,7 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --
 4. The build pipeline is mandatory:
    - Convert each PDF with MarkItDown and write that as the Markdown base.
    - Extract page text again with PyMuPDF and pdfplumber.
-   - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 頁補漏` section.
+   - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 页补漏` section.
    - If neither native extractor finds text, run Windows OCR first, then RapidOCR only if Windows OCR returns no text.
    - Record source coverage in `.pdf_kb/coverage_report.json`.
 5. Include optional curated material:
@@ -38,7 +38,7 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --
 7. Search by KB directory so retrieval stays decoupled from KB content:
 
 ```powershell
-python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查詢文字" --kb-dir "D:\path\to\pdf-folder\.pdf_kb"
+python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查询文字" --kb-dir "D:\path\to\pdf-folder\.pdf_kb"
 ```
 
 ## Generated KB Layout
