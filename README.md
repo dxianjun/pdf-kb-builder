@@ -1,4 +1,4 @@
-# PDF KB Builder
+﻿# PDF KB Builder
 
 将指定目录下的 PDF 文件转换成可检索的本地知识库。建库时，流程固定为：先批量用 MarkItDown 为所有新增或变更 PDF 产生 Markdown 基底，再用 PyMuPDF、pdfplumber、Windows OCR Runtime API、RapidOCR 逐页交叉补漏。
 
@@ -17,21 +17,19 @@ pdf-kb-builder/
     dependencies.md
   assets/
     fonts/font-manifest.json
-    fonts/NotoSansSC-VF.ttf
-    rapidocr/models/*.onnx
     windows-ocr/capabilities.json
   tools/                  # 安装脚本创建，放本技能自己的依赖；不提交
 ```
 
 ## 安装依赖
 
-Windows 安装脚本默认会在技能包自己的目录下创建 `tools`，并把缺少的 Python 包、RapidOCR 模型和随包字体安装/复制到这个目录。安装到 `D:\ai_tools\pdf-kb\pdf-kb-builder` 后，默认补缺目录就是 `D:\ai_tools\pdf-kb\pdf-kb-builder\tools`。如需明确安装到其他目录，可以使用 `-TargetPath`；这不是“必须使用技能内 tools”的硬性限制。
+Windows 安装脚本默认会在技能包自己的目录下创建 `tools`，并把缺少的 Python 包安装到这个目录。以 `-TargetPath` 指向的安装目录为例，安装后默认补缺目录是该目录下的 `tools`。如需明确安装到其他目录，可以使用 `-TargetPath`；这不是“必须使用技能内 tools”的硬性限制。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1
 ```
 
-安装脚本会先复制随包 RapidOCR 模型和随包 CJK 字体，`tools` 中已有同名文件则跳过；再用“系统/全局 Python 包（`site.getsitepackages()`、`site.getusersitepackages()`、`sys.path`） + `D:\ai_tools` 及其所有直接子目录 + `AI_TOOLS_HOME` 及其所有直接子目录 + 技能 `tools`”联合检查 Python 包，只把仍然缺少的包安装到目标目录。运行时也会把这些位置一起加入可用依赖来源，所以可以调用系统全局包和 `D:\ai_tools` 里的已有包。脚本默认设置用户环境变量 `PDF_KB_TOOLS_HOME` 并把目标目录追加到用户 `Path`。它不会删除或覆盖 `D:\ai_tools` 根目录下原有的工具包，也不会把 `AI_TOOLS_HOME` 改成别的值。卸载时使用 `-Uninstall`；脚本只删除技能包默认的 `tools` 目录，并且只清理指向该目录的 `PDF_KB_TOOLS_HOME` / `Path`，不会删除自定义 `-TargetPath` 或 `D:\ai_tools` 中的其他工具。
+安装脚本会先用“系统/全局 Python 包（`site.getsitepackages()`、`site.getusersitepackages()`、`sys.path`） + `AI_TOOLS_HOME` 及其所有直接子目录 + `AI_TOOLS_HOME` 及其所有直接子目录 + 技能 `tools`”联合检查 Python 包，只把仍然缺少的包安装到目标目录。运行时也会把这些位置一起加入可用依赖来源，所以可以复用系统全局包和 `AI_TOOLS_HOME` 里的已有包。脚本默认设置用户环境变量 `PDF_KB_TOOLS_HOME` 并把目标目录追加到用户 `Path`。它不会删除或覆盖 `AI_TOOLS_HOME` 根目录下原有的工具包，也不会把 `AI_TOOLS_HOME` 改成别的值。卸载时使用 `-Uninstall`；脚本只删除技能包默认的 `tools` 目录，并且只清理指向该目录的 `PDF_KB_TOOLS_HOME` / `Path`，不会删除自定义 `-TargetPath` 或 `AI_TOOLS_HOME` 中的其他工具。
 
 Windows OCR 以 Runtime API 实测为准：能通过 `winsdk` 调用 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或用户语言 profile engine 时，即视为可用，不再查询或安装 OCR capability。只有 Runtime API 不可用且当前 PowerShell 有管理员权限时，才尝试安装 Windows OCR capability。
 
@@ -109,7 +107,7 @@ python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --resume
 
 ## 验证
 
-验证安装逻辑时，不要只在已有 `tools` 目录上重复跑。应先用 `-Uninstall` 删除本技能默认的 `tools`，再重新执行安装脚本；这能确认系统/全局 Python 包、`D:\ai_tools`、`AI_TOOLS_HOME` 和重新创建的技能 `tools` 会被联合检查，并且缺少的包才会补装。这个验证只允许删除本技能自己的 `tools`，不能删除 `D:\ai_tools` 根目录或其中已有工具。
+验证安装逻辑时，不要只在已有 `tools` 目录上重复跑。应先用 `-Uninstall` 删除本技能默认的 `tools`，再重新执行安装脚本；这能确认系统/全局 Python 包、`AI_TOOLS_HOME`、`AI_TOOLS_HOME` 和重新创建的技能 `tools` 会被联合检查，并且缺少的包才会补装。这个验证只允许删除本技能自己的 `tools`，不能删除 `AI_TOOLS_HOME` 根目录或其中已有工具。
 
 ```powershell
 python -m unittest discover -s .\scripts\tests
@@ -131,3 +129,4 @@ python .\scripts\pdf_kb.py deps
 ## 说明
 
 `SKILL.md` 是给 Codex 使用的技能入口；`README.md` 是给人快速上手的说明文件。若两者有冲突，以 `SKILL.md` 和脚本实际参数为准。
+

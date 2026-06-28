@@ -372,63 +372,6 @@ function Install-MissingPythonRequirements {
     }
 }
 
-function Copy-FileIfMissing {
-    param(
-        [string]$Source,
-        [string]$Destination,
-        [string]$ExistingMessage,
-        [string]$CopyMessage
-    )
-
-    if (Test-Path -LiteralPath $Destination) {
-        Write-Host "$ExistingMessage $Destination"
-        return
-    }
-
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-    Write-Host "$CopyMessage $Destination"
-    Copy-Item -LiteralPath $Source -Destination $Destination
-}
-
-function Install-BundledRapidOcrModels {
-    $sourceDir = Join-Path $assetsRoot "rapidocr\models"
-    if (-not (Test-Path -LiteralPath $sourceDir)) {
-        Write-Warning "Bundled RapidOCR model directory not found: $sourceDir"
-        return
-    }
-
-    $targetDir = Join-Path $TargetPath "rapidocr\models"
-    foreach ($model in Get-ChildItem -LiteralPath $sourceDir -File -Filter "*.onnx") {
-        $destination = Join-Path $targetDir $model.Name
-        Copy-FileIfMissing `
-            -Source $model.FullName `
-            -Destination $destination `
-            -ExistingMessage "Skipping existing bundled RapidOCR model:" `
-            -CopyMessage "Copying bundled RapidOCR model:"
-    }
-}
-
-function Install-BundledFonts {
-    $sourceDir = Join-Path $assetsRoot "fonts"
-    if (-not (Test-Path -LiteralPath $sourceDir)) {
-        Write-Warning "Bundled font directory not found: $sourceDir"
-        return
-    }
-
-    $targetDir = Join-Path $TargetPath "fonts"
-    $fontFiles = Get-ChildItem -LiteralPath $sourceDir -File | Where-Object {
-        $_.Extension.ToLowerInvariant() -in @(".ttf", ".ttc", ".otf")
-    }
-    foreach ($font in $fontFiles) {
-        $destination = Join-Path $targetDir $font.Name
-        Copy-FileIfMissing `
-            -Source $font.FullName `
-            -Destination $destination `
-            -ExistingMessage "Skipping existing bundled font:" `
-            -CopyMessage "Copying bundled font:"
-    }
-}
-
 function Get-WindowsOcrManifest {
     $manifestPath = Join-Path $assetsRoot "windows-ocr\capabilities.json"
     if (Test-Path -LiteralPath $manifestPath) {
@@ -521,16 +464,7 @@ function Install-WindowsCapabilityIfMissing {
 }
 
 function Get-CjkFontCandidates {
-    $targetFontDir = Join-Path $TargetPath "fonts"
-    $bundledFonts = @()
-    if (Test-Path -LiteralPath $targetFontDir) {
-        $bundledFonts = Get-ChildItem -LiteralPath $targetFontDir -File | Where-Object {
-            $_.Extension.ToLowerInvariant() -in @(".ttf", ".ttc", ".otf")
-        } | Select-Object -ExpandProperty FullName
-    }
-
     return @(
-        $bundledFonts
         "$env:WINDIR\Fonts\msjh.ttc",
         "$env:WINDIR\Fonts\mingliu.ttc",
         "$env:WINDIR\Fonts\NotoSansCJK-Regular.ttc",
@@ -563,9 +497,6 @@ New-Item -ItemType Directory -Force -Path $TargetPath | Out-Null
 
 $missingRequirements = Get-MissingPythonRequirements $requirements
 Install-MissingPythonRequirements $missingRequirements
-if ($missingRequirements -contains "rapidocr_onnxruntime") {
-    Install-BundledRapidOcrModels
-}
 
 if (-not $SkipUserEnv) {
     [Environment]::SetEnvironmentVariable("PDF_KB_TOOLS_HOME", $TargetPath, "User")
@@ -580,8 +511,7 @@ $windowsOcrRuntimeAvailable = Test-WindowsOcrRuntime
 Write-Host "Checking common CJK fonts"
 $cjkFontAvailable = Test-CjkFontAvailable
 if (-not $cjkFontAvailable) {
-    Install-BundledFonts
-    $cjkFontAvailable = Test-CjkFontAvailable
+    Write-Host "No common CJK font found under system font directories."
 }
 
 if (-not $SkipWindowsCapabilities) {

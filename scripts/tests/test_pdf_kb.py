@@ -414,24 +414,16 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertIn("zh-Hans-CN", runtime)
         self.assertIn("profile_engine", runtime)
 
-    def test_skill_bundles_ocr_and_font_assets_for_installer(self) -> None:
+    def test_installer_does_not_bundle_rapidocr_models_or_fonts(self) -> None:
         skill_root = Path(__file__).resolve().parents[2]
         installer_text = (skill_root / "scripts" / "install_windows_dependencies.ps1").read_text(encoding="utf-8")
 
-        rapidocr_models = skill_root / "assets" / "rapidocr" / "models"
-        self.assertTrue((rapidocr_models / "PP-OCRv6_det_small.onnx").exists())
-        self.assertTrue((rapidocr_models / "PP-OCRv6_rec_small.onnx").exists())
-        self.assertTrue((rapidocr_models / "ch_ppocr_mobile_v2.0_cls_mobile.onnx").exists())
-        self.assertTrue((skill_root / "assets" / "fonts" / "NotoSansSC-VF.ttf").exists())
-        self.assertTrue((skill_root / "assets" / "windows-ocr" / "capabilities.json").exists())
-
-        self.assertIn("Install-BundledRapidOcrModels", installer_text)
-        self.assertIn("Install-BundledFonts", installer_text)
+        self.assertNotIn("Install-BundledRapidOcrModels", installer_text)
+        self.assertNotIn("Install-BundledFonts", installer_text)
+        self.assertNotIn("Skipping existing bundled RapidOCR model", installer_text)
+        self.assertNotIn("Skipping existing bundled font", installer_text)
         self.assertIn("Test-WindowsOcrRuntime", installer_text)
-        self.assertIn("Windows OCR runtime is available through Windows OCR API", installer_text)
         self.assertIn("Get-BundledWindowsOcrCapabilities", installer_text)
-        self.assertIn("Skipping existing bundled RapidOCR model", installer_text)
-        self.assertIn("Skipping existing bundled font", installer_text)
 
 
 if __name__ == "__main__":
