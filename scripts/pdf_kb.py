@@ -963,7 +963,40 @@ def search_kb_dir(query: str, kb_dir: Path, limit: int = 8, qa_path: Path | None
     return search(query, kb_path, resolved_qa, limit)
 
 
-def dependency_status() -> dict[str, bool]:
+def windows_ocr_runtime_api_status() -> dict[str, bool]:
+    status: dict[str, bool] = {
+        "zh-Hant-HK": False,
+        "zh-Hant-TW": False,
+        "zh-Hans-CN": False,
+        "en-US": False,
+        "profile_engine": False,
+        "available": False,
+    }
+    try:
+        import winsdk.windows.globalization as win_globalization  # type: ignore
+        import winsdk.windows.media.ocr as win_ocr  # type: ignore
+    except Exception:
+        return status
+
+    for tag in ("zh-Hant-HK", "zh-Hant-TW", "zh-Hans-CN", "en-US"):
+        try:
+            status[tag] = bool(win_ocr.OcrEngine.is_language_supported(win_globalization.Language(tag)))
+        except Exception:
+            status[tag] = False
+
+    try:
+        status["profile_engine"] = win_ocr.OcrEngine.try_create_from_user_profile_languages() is not None
+    except Exception:
+        status["profile_engine"] = False
+
+    status["available"] = (
+        status["profile_engine"]
+        or (status["zh-Hant-HK"] and status["zh-Hant-TW"] and status["zh-Hans-CN"])
+    )
+    return status
+
+
+def dependency_status() -> dict[str, Any]:
     return {
         "markitdown": MarkItDown is not None,
         "opencc": OpenCC is not None,
@@ -972,6 +1005,7 @@ def dependency_status() -> dict[str, bool]:
         "numpy": np is not None,
         "rapidocr": RapidOCR is not None,
         "windows_ocr_runtime": importlib.util.find_spec("winsdk") is not None,
+        "windows_ocr_runtime_api": windows_ocr_runtime_api_status(),
         "ai_tools_home_exists": AI_TOOLS_HOME.exists(),
     }
 

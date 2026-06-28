@@ -1,6 +1,6 @@
 # PDF KB Builder
 
-将指定目录下的 PDF 文件转换成可检索的本地知识库。建库时，流程固定为：先批量用 MarkItDown 为所有新增或变更 PDF 产生 Markdown 基底，再用 PyMuPDF、pdfplumber、Windows OCR、RapidOCR 逐页交叉补漏。
+将指定目录下的 PDF 文件转换成可检索的本地知识库。建库时，流程固定为：先批量用 MarkItDown 为所有新增或变更 PDF 产生 Markdown 基底，再用 PyMuPDF、pdfplumber、Windows OCR Runtime API、RapidOCR 逐页交叉补漏。
 
 ## 目录结构
 
@@ -17,6 +17,9 @@ pdf-kb-builder/
     dependencies.md
   assets/
     fonts/font-manifest.json
+    fonts/NotoSansSC-VF.ttf
+    rapidocr/models/*.onnx
+    windows-ocr/capabilities.json
 ```
 
 ## 安装依赖
@@ -27,9 +30,9 @@ Windows 建议把工具依赖安装到 `D:\ai_tools`：
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -TargetPath D:\ai_tools -UpdateUserEnv
 ```
 
-安装脚本会先检测 Python 包、Windows OCR 能力和常见 CJK 字体。已存在的 Python 包和字体会跳过；缺少的 Python 包会安装到 `D:\ai_tools`，缺少 CJK 字体时会自动安装 Windows CJK 字体能力。
+安装脚本会先复制随包 RapidOCR 模型和随包 CJK 字体，目标目录已有同名文件则跳过；再检测 Python 包，只把缺少的包安装到 `D:\ai_tools`。Windows OCR 以 Runtime API 实测为准：能通过 `winsdk` 调用 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或用户语言 profile engine 时，即视为可用，不再查询或安装 OCR capability。只有 Runtime API 不可用且当前 PowerShell 有管理员权限时，才尝试安装 Windows OCR capability。
 
-如果不想安装 Windows OCR/字体能力，只安装 Python 套件：
+如果不想安装 Windows OCR/字体 capability，只安装/复制本技能包可处理的依赖：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_windows_dependencies.ps1 -TargetPath D:\ai_tools -SkipWindowsCapabilities
@@ -46,8 +49,8 @@ python .\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --recursive
 
 1. MarkItDown 先批量把所有新增或变更 PDF 转成 Markdown 基底。
 2. MarkItDown 批量阶段完成后，PyMuPDF 和 pdfplumber 再逐页抽取文字，检查是否漏页或漏段。
-3. 若原生文字抽不到，先跑 Windows OCR。
-4. Windows OCR 没有结果时，才回落 RapidOCR。
+3. 若原生文字抽不到，先跑 Windows OCR Runtime API。
+4. Windows OCR Runtime API 没有结果时，才回落 RapidOCR。
 5. 漏抽出的内容会补到 `.pdf_kb/markdown/*.md` 的 `PDF 第 N 页补漏` 区段。
 
 再次执行同一条 `build` 命令即可同步更新：
@@ -114,6 +117,7 @@ python .\scripts\pdf_kb.py deps
 - `catalog.md` 是否列出全部 PDF。
 - `coverage_report.json` 中 `markitdown_status` 是否为 `ok`。
 - `coverage_report.json` 中 `supplemented_pages`、`windows_ocr_pages`、`rapidocr_pages` 是否符合预期。
+- `pdf_kb.py deps` 中 `windows_ocr_runtime_api` 是否显示 `zh-Hant-HK`、`zh-Hant-TW`、`zh-Hans-CN` 或 `profile_engine` 可用。
 - 新增/删除 PDF 后重新执行 `build`，确认 `.pdf_kb/markdown` 和 `markdown_chunks.jsonl` 已同步。
 - `no_ocr_text_pages` 是否主要为封面、照片、分隔页或空白页。
 - 用已知问题搜索一次，确认能命中正确来源。

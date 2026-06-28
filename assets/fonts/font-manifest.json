@@ -1,8 +1,16 @@
 {
-  "purpose": "Font dependency manifest for PDF rendering/OCR review. The skill installs/checks OS font capabilities instead of vendoring proprietary font binaries.",
+  "purpose": "Font dependency manifest for PDF rendering/OCR review. The skill bundles open CJK fallback fonts and checks OS font capabilities instead of vendoring proprietary Microsoft font binaries.",
+  "bundled_fonts": [
+    {
+      "file": "NotoSansSC-VF.ttf",
+      "family": "Noto Sans SC",
+      "purpose": "Bundled open CJK fallback font copied to the target tool directory when missing."
+    }
+  ],
   "windows_common_fonts": [
     "C:\\Windows\\Fonts\\msjh.ttc",
     "C:\\Windows\\Fonts\\mingliu.ttc",
+    "C:\\Windows\\Fonts\\NotoSansSC-VF.ttf",
     "C:\\Windows\\Fonts\\simsun.ttc",
     "C:\\Windows\\Fonts\\simhei.ttf"
   ],

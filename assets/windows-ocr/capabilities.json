@@ -1,0 +1,18 @@
+{
+  "purpose": "Windows OCR is a system capability. This bundled manifest records the capabilities that the installer checks and enables when it runs with administrator rights.",
+  "ocr_capabilities": [
+    "Language.OCR~~~zh-HK~0.0.1.0",
+    "Language.OCR~~~zh-TW~0.0.1.0",
+    "Language.OCR~~~zh-CN~0.0.1.0"
+  ],
+  "font_capabilities": [
+    "Language.Fonts.Hant~~~und-HANT~0.0.1.0",
+    "Language.Fonts.Hans~~~und-HANS~0.0.1.0"
+  ],
+  "runtime_language_tags": [
+    "zh-Hant-HK",
+    "zh-Hant-TW",
+    "zh-Hans-CN",
+    "en-US"
+  ]
+}

@@ -7,7 +7,7 @@ description: Use when Codex needs to turn PDFs in a user-specified directory int
 
 ## Core Rule
 
-Always build from source PDFs before answering. For new or changed PDFs, batch-generate all MarkItDown Markdown bases first, then run the cross-check and repair stage with PyMuPDF, pdfplumber, Windows OCR, and RapidOCR.
+Always build from source PDFs before answering. For new or changed PDFs, batch-generate all MarkItDown Markdown bases first, then run the cross-check and repair stage with PyMuPDF, pdfplumber, Windows OCR Runtime API, and RapidOCR.
 
 Every response produced by this skill must include source citations. Answers must include sources. For product answers, cite KB search metadata. For build/update/validation work, cite generated artifacts or command evidence such as `.pdf_kb/manifest.json`, `.pdf_kb/catalog.md`, `.pdf_kb/coverage_report.json`, `markdown_chunks.jsonl`, or test/dependency command output. Do not provide a source-free final answer when this skill is used.
 
@@ -28,7 +28,7 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py build "D:\path\to\pdf-folder" --
    - For every new or changed PDF, run MarkItDown first and write the Markdown base.
    - Only after the MarkItDown batch finishes, extract page text with PyMuPDF and pdfplumber.
    - If a page is missing from the MarkItDown result, append the best PyMuPDF/pdfplumber text as a `PDF 第 N 页补漏` section.
-   - If neither native extractor finds text, run Windows OCR first, then RapidOCR only if Windows OCR returns no text.
+   - If neither native extractor finds text, run Windows OCR Runtime API first, then RapidOCR only if Windows OCR Runtime API returns no text.
    - Record source coverage in `.pdf_kb/coverage_report.json`.
 5. Include optional curated material:
    - Place `qa_overrides.jsonl` under `.pdf_kb/` for high-priority exact answers.
@@ -47,7 +47,7 @@ python path\to\pdf-kb-builder\scripts\pdf_kb.py search "查询文字" --kb-dir "
 - `.pdf_kb/markdown_chunks.jsonl`: searchable chunks.
 - `.pdf_kb/manifest.json`: source paths, generated Markdown paths, hashes, line counts, chunk counts; used for sync.
 - `.pdf_kb/catalog.md`: human-readable catalog.
-- `.pdf_kb/coverage_report.json`: MarkItDown status, PyMuPDF/pdfplumber pages, Windows OCR pages, RapidOCR pages, repaired pages, and no-text pages.
+- `.pdf_kb/coverage_report.json`: MarkItDown status, PyMuPDF/pdfplumber pages, Windows OCR Runtime API pages, RapidOCR pages, repaired pages, and no-text pages.
 - `.pdf_kb/qa_overrides.jsonl`: optional curated answers, searched before chunks.
 
 ## Dependencies
@@ -57,11 +57,12 @@ Use `scripts/requirements.txt` for Python packages and `scripts/install_windows_
 The installer covers:
 
 - Dependency checks before installation. Existing Python imports are skipped; only missing packages are installed to the target path.
-- PDF tools: MarkItDown, PyMuPDF, pdfplumber, pypdf, pypdfium2, reportlab.
-- OCR tools: Windows OCR runtime (`winsdk`), RapidOCR, onnxruntime, opencv-python-headless, Pillow, numpy.
+- PDF tools: MarkItDown, PyMuPDF, pdfplumber, pypdf, pypdfium2.
+- OCR tools: Windows OCR Runtime API via `winsdk`, RapidOCR, onnxruntime, opencv-python-headless, Pillow, numpy.
 - Chinese conversion: opencc-python-reimplemented.
-- Windows OCR language capabilities: zh-HK, zh-TW, zh-CN, installed only when missing.
-- Windows CJK font checks. Existing common CJK font files are skipped; if none are found, Windows CJK font capabilities are installed when elevation is available.
+- Bundled assets: RapidOCR ONNX models and an open CJK fallback font are copied from `assets/` to the target tool directory when missing.
+- Windows OCR availability is validated through the OCR Runtime API (`zh-Hant-HK`, `zh-Hant-TW`, `zh-Hans-CN`, and user profile engine). Use Windows capability installation only as an elevated fallback when the runtime probe fails.
+- Windows CJK font checks. Existing common CJK font files or bundled fallback fonts are skipped; if none are found, Windows CJK font capabilities are installed when elevation is available.
 
 ## Search Behavior
 

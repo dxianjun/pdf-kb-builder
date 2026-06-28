@@ -302,6 +302,53 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertIn("At least one common CJK font already exists", installer_text)
         self.assertIn("Install-WindowsCapabilityIfMissing", installer_text)
 
+    def test_requirements_do_not_install_unused_reportlab(self) -> None:
+        scripts_dir = Path(__file__).resolve().parents[1]
+        requirements_text = (scripts_dir / "requirements.txt").read_text(encoding="utf-8")
+        installer_text = (scripts_dir / "install_windows_dependencies.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("reportlab", requirements_text)
+        self.assertNotIn('"reportlab"', installer_text)
+
+    def test_windows_installer_passes_target_path_via_environment(self) -> None:
+        installer_path = Path(__file__).resolve().parents[1] / "install_windows_dependencies.ps1"
+        installer_text = installer_path.read_text(encoding="utf-8")
+
+        self.assertIn("PDF_KB_INSTALL_TARGET", installer_text)
+        self.assertIn("os.environ['PDF_KB_INSTALL_TARGET']", installer_text)
+        self.assertNotIn('os.environ["PDF_KB_INSTALL_TARGET"]', installer_text)
+        self.assertNotIn('sys.path.insert(0, r"$TargetPath")', installer_text)
+
+    def test_dependency_status_reports_windows_ocr_runtime_api(self) -> None:
+        status = pdf_kb.dependency_status()
+
+        self.assertIn("windows_ocr_runtime_api", status)
+        runtime = status["windows_ocr_runtime_api"]
+        self.assertIsInstance(runtime, dict)
+        self.assertIn("zh-Hant-HK", runtime)
+        self.assertIn("zh-Hant-TW", runtime)
+        self.assertIn("zh-Hans-CN", runtime)
+        self.assertIn("profile_engine", runtime)
+
+    def test_skill_bundles_ocr_and_font_assets_for_installer(self) -> None:
+        skill_root = Path(__file__).resolve().parents[2]
+        installer_text = (skill_root / "scripts" / "install_windows_dependencies.ps1").read_text(encoding="utf-8")
+
+        rapidocr_models = skill_root / "assets" / "rapidocr" / "models"
+        self.assertTrue((rapidocr_models / "PP-OCRv6_det_small.onnx").exists())
+        self.assertTrue((rapidocr_models / "PP-OCRv6_rec_small.onnx").exists())
+        self.assertTrue((rapidocr_models / "ch_ppocr_mobile_v2.0_cls_mobile.onnx").exists())
+        self.assertTrue((skill_root / "assets" / "fonts" / "NotoSansSC-VF.ttf").exists())
+        self.assertTrue((skill_root / "assets" / "windows-ocr" / "capabilities.json").exists())
+
+        self.assertIn("Install-BundledRapidOcrModels", installer_text)
+        self.assertIn("Install-BundledFonts", installer_text)
+        self.assertIn("Test-WindowsOcrRuntime", installer_text)
+        self.assertIn("Windows OCR runtime is available through Windows OCR API", installer_text)
+        self.assertIn("Get-BundledWindowsOcrCapabilities", installer_text)
+        self.assertIn("Skipping existing bundled RapidOCR model", installer_text)
+        self.assertIn("Skipping existing bundled font", installer_text)
+
 
 if __name__ == "__main__":
     unittest.main()
