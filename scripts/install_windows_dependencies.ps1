@@ -142,7 +142,6 @@ function Get-DependencySearchPaths {
     foreach ($path in Get-PythonSystemSearchPaths -PythonExe $Python) {
         Add-UniquePath $paths $path
     }
-    Add-ToolRootAndChildren $paths "D:\ai_tools"
 
     foreach ($scope in @("Process", "User", "Machine")) {
         $aiToolsHome = [Environment]::GetEnvironmentVariable("AI_TOOLS_HOME", $scope)

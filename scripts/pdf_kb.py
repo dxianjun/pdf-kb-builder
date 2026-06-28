@@ -16,7 +16,6 @@ from typing import Any
 SCRIPT_ROOT = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_ROOT.parent
 DEFAULT_TOOLS_HOME = SKILL_ROOT / "tools"
-DEFAULT_AI_TOOLS_HOME = Path(r"D:\ai_tools")
 PDF_KB_TOOLS_HOME = Path(os.environ.get("PDF_KB_TOOLS_HOME", str(DEFAULT_TOOLS_HOME)))
 
 
@@ -65,15 +64,21 @@ def system_dependency_paths() -> list[Path]:
     return paths
 
 
+def configured_ai_tools_homes() -> list[Path]:
+    homes: list[Path] = []
+    env_ai_tools_home = os.environ.get("AI_TOOLS_HOME")
+    if env_ai_tools_home:
+        add_unique_dependency_path(homes, Path(env_ai_tools_home))
+    return homes
+
+
 def dependency_search_paths() -> list[Path]:
     paths: list[Path] = []
     add_unique_dependency_path(paths, PDF_KB_TOOLS_HOME)
     for path in SYSTEM_DEPENDENCY_PATHS:
         add_unique_dependency_path(paths, path)
-    add_tool_root_and_children(paths, DEFAULT_AI_TOOLS_HOME)
-    ai_tools_home = os.environ.get("AI_TOOLS_HOME")
-    if ai_tools_home:
-        add_tool_root_and_children(paths, Path(ai_tools_home))
+    for ai_tools_home in configured_ai_tools_homes():
+        add_tool_root_and_children(paths, ai_tools_home)
     return paths
 
 
@@ -120,18 +125,8 @@ except Exception:  # pragma: no cover
 HK_CONVERTER = OpenCC("s2hk") if OpenCC else None
 MIN_QA_SCORE = 180
 
-
 VARIANT_REPLACEMENTS = {
-    "糖ji": "糖愈",
-    "糖疾": "糖愈",
-    "心疾": "心愈",
-    "自主人生": "智主人生",
-    "垫底费": "自付费",
-    "百份比": "百分比",
-    "\u5d57": "岁",
-    "\u6b73": "岁",
 }
-
 
 MOJIBAKE_MARKERS = (
     "\u9286",
@@ -157,17 +152,40 @@ def to_hk(text: str) -> str:
 
 
 def repair_mojibake(text: str) -> str:
-    if not text or not any(marker in text for marker in MOJIBAKE_MARKERS):
+    if not text:
         return text
-    try:
-        repaired = text.encode("cp936", errors="replace").decode("utf-8", errors="replace")
-    except Exception:
-        return text
-    return repaired if mojibake_score(repaired) < mojibake_score(text) else text
+    return "".join(repair_mojibake_line(line) for line in text.splitlines(keepends=True))
 
 
 def mojibake_score(text: str) -> int:
-    return sum(text.count(marker) * 5 for marker in MOJIBAKE_MARKERS) + text.count("�") * 20
+    score = sum(text.count(marker) * 5 for marker in MOJIBAKE_MARKERS)
+    score += text.count("\ufffd") * 20
+    score += len(re.findall(r"[\ue000-\uf8ff]", text)) * 20
+    return score
+
+
+def repair_mojibake_line(text: str) -> str:
+    if not any(marker in text for marker in MOJIBAKE_MARKERS):
+        return text
+    candidates: list[str] = []
+    try:
+        candidates.append(text.encode("cp936", errors="replace").decode("utf-8", errors="replace"))
+    except Exception:
+        candidates.append(text)
+    try:
+        candidates.append(text.encode("latin1").decode("utf-8", errors="replace"))
+    except Exception:
+        pass
+    best = text
+    best_score = mojibake_score(text)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate_score = mojibake_score(candidate)
+        if candidate_score < best_score:
+            best = candidate
+            best_score = candidate_score
+    return best
 
 
 def normalize_markdown(text: str) -> str:
@@ -1078,8 +1096,8 @@ def dependency_status() -> dict[str, Any]:
         "windows_ocr_runtime_api": windows_ocr_runtime_api_status(),
         "pdf_kb_tools_home": str(PDF_KB_TOOLS_HOME),
         "pdf_kb_tools_home_exists": PDF_KB_TOOLS_HOME.exists(),
-        "ai_tools_home": str(DEFAULT_AI_TOOLS_HOME),
-        "ai_tools_home_exists": DEFAULT_AI_TOOLS_HOME.exists(),
+        "ai_tools_homes": [str(path) for path in configured_ai_tools_homes()],
+        "ai_tools_homes_exists": [path.exists() for path in configured_ai_tools_homes()],
         "system_dependency_paths": [str(path) for path in SYSTEM_DEPENDENCY_PATHS],
         "dependency_search_paths": [str(path) for path in DEPENDENCY_SEARCH_PATHS],
     }
