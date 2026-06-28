@@ -242,8 +242,8 @@ class PdfKbBuilderTests(unittest.TestCase):
         skill_path = Path(__file__).resolve().parents[2] / "SKILL.md"
         skill_text = skill_path.read_text(encoding="utf-8")
 
-        self.assertIn("凡是用這個技能", skill_text)
-        self.assertIn("回答必須附來源", skill_text)
+        self.assertIn("Every response produced by this skill must include source citations.", skill_text)
+        self.assertIn("Answers must include sources.", skill_text)
         self.assertIn("markdown_file", skill_text)
         self.assertIn("line", skill_text)
         self.assertIn("start_line", skill_text)
