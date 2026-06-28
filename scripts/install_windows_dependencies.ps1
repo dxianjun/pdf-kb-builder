@@ -21,7 +21,7 @@ $pythonImportMap = @{
     "pypdf" = @("pypdf")
     "pdfplumber" = @("pdfplumber")
     "pypdfium2" = @("pypdfium2")
-    "rapidocr_onnxruntime" = @("rapidocr_onnxruntime:RapidOCR")
+    "rapidocr_onnxruntime" = @("rapidocr:RapidOCR|rapidocr_onnxruntime:RapidOCR")
     "onnxruntime" = @("onnxruntime")
     "opencv-python-headless" = @("cv2")
     "pillow" = @("PIL")
@@ -60,14 +60,93 @@ function Add-UniquePath {
     $Paths.Add($fullPath) | Out-Null
 }
 
+function Add-ToolRootAndChildren {
+    param(
+        [System.Collections.Generic.List[string]]$Paths,
+        [string]$ToolRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ToolRoot)) {
+        return
+    }
+
+    Add-UniquePath $Paths $ToolRoot
+    if (Test-Path -LiteralPath $ToolRoot) {
+        foreach ($child in Get-ChildItem -LiteralPath $ToolRoot -Directory -ErrorAction SilentlyContinue) {
+            Add-UniquePath $Paths $child.FullName
+        }
+    }
+}
+
+function Get-PythonSystemSearchPaths {
+    param([string]$PythonExe)
+
+    if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+        $PythonExe = $Python
+    }
+
+    $pythonCode = @'
+import json
+import os
+import site
+import sys
+
+paths = []
+try:
+    paths.extend(site.getsitepackages())
+except Exception:
+    pass
+try:
+    user_site = site.getusersitepackages()
+    if user_site:
+        paths.append(user_site)
+except Exception:
+    pass
+for item in sys.path:
+    if item:
+        paths.append(item)
+print(json.dumps([path for path in paths if path and os.path.isdir(path)]))
+'@
+
+    try {
+        $output = (& $PythonExe -c $pythonCode | Out-String).Trim()
+    }
+    catch {
+        return @()
+    }
+
+    if (-not $output) {
+        return @()
+    }
+
+    try {
+        $pythonPaths = $output | ConvertFrom-Json -ErrorAction Stop
+        if (-not $pythonPaths) {
+            return @()
+        }
+
+        $resolved = New-Object System.Collections.Generic.List[string]
+        foreach ($path in $pythonPaths) {
+            Add-UniquePath $resolved $path
+        }
+        return @($resolved)
+    }
+    catch {
+        return @()
+    }
+}
+
 function Get-DependencySearchPaths {
     $paths = New-Object System.Collections.Generic.List[string]
     Add-UniquePath $paths $TargetPath
-    Add-UniquePath $paths "D:\ai_tools"
+    foreach ($path in Get-PythonSystemSearchPaths -PythonExe $Python) {
+        Add-UniquePath $paths $path
+    }
+    Add-ToolRootAndChildren $paths "D:\ai_tools"
 
     foreach ($scope in @("Process", "User", "Machine")) {
         $aiToolsHome = [Environment]::GetEnvironmentVariable("AI_TOOLS_HOME", $scope)
-        Add-UniquePath $paths $aiToolsHome
+        Add-ToolRootAndChildren $paths $aiToolsHome
     }
 
     return @($paths)
@@ -219,18 +298,24 @@ checks = $moduleList
 
 missing = []
 for check in checks:
-    module_name, _, attr_path = check.partition(':')
-    spec = importlib.util.find_spec(module_name)
-    if spec is None:
+    alternatives = [part for part in check.split('|') if part]
+    found = False
+    for alternative in alternatives:
+        module_name, _, attr_path = alternative.partition(':')
+        spec = importlib.util.find_spec(module_name)
+        if spec is None:
+            continue
+        if attr_path:
+            try:
+                module = importlib.import_module(module_name)
+                for part in attr_path.split('.'):
+                    module = getattr(module, part)
+            except Exception:
+                continue
+        found = True
+        break
+    if not found:
         missing.append(check)
-        continue
-    if attr_path:
-        try:
-            module = importlib.import_module(module_name)
-            for part in attr_path.split('.'):
-                module = getattr(module, part)
-        except Exception:
-            missing.append(check)
 raise SystemExit(1 if missing else 0)
 "@
     return (Invoke-PythonWithInstallTarget $check) -eq 0
@@ -476,11 +561,12 @@ if ($Uninstall) {
 $TargetPath = Resolve-InstallTargetPath $TargetPath
 
 New-Item -ItemType Directory -Force -Path $TargetPath | Out-Null
-Install-BundledRapidOcrModels
-Install-BundledFonts
 
 $missingRequirements = Get-MissingPythonRequirements $requirements
 Install-MissingPythonRequirements $missingRequirements
+if ($missingRequirements -contains "rapidocr_onnxruntime") {
+    Install-BundledRapidOcrModels
+}
 
 if (-not $SkipUserEnv) {
     [Environment]::SetEnvironmentVariable("PDF_KB_TOOLS_HOME", $TargetPath, "User")
@@ -494,6 +580,10 @@ $windowsOcrRuntimeAvailable = Test-WindowsOcrRuntime
 
 Write-Host "Checking common CJK fonts"
 $cjkFontAvailable = Test-CjkFontAvailable
+if (-not $cjkFontAvailable) {
+    Install-BundledFonts
+    $cjkFontAvailable = Test-CjkFontAvailable
+}
 
 if (-not $SkipWindowsCapabilities) {
     if ($windowsOcrRuntimeAvailable) {
@@ -539,7 +629,7 @@ else {
 }
 
 Write-Host "Validating Python imports"
-$validationImports = @("fitz", "markitdown", "pypdf", "pdfplumber", "rapidocr_onnxruntime:RapidOCR", "opencc", "PIL", "numpy", "winsdk")
+$validationImports = @("fitz", "markitdown", "pypdf", "pdfplumber", "rapidocr:RapidOCR|rapidocr_onnxruntime:RapidOCR", "opencc", "PIL", "numpy", "winsdk")
 if (-not (Test-PythonImports $validationImports)) {
     throw "Dependency validation failed"
 }

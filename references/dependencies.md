@@ -1,10 +1,10 @@
 # Dependencies
 
-Windows 使用 `scripts/install_windows_dependencies.ps1` 安装依赖。脚本默认目标是技能根目录下的 `tools`，例如安装在 `D:\ai_tools\pdf-kb\pdf-kb-builder` 时，补缺目录是 `D:\ai_tools\pdf-kb\pdf-kb-builder\tools`。如果用户明确需要其他依赖目录，可以传入 `-TargetPath`；这不是必须使用技能内 `tools` 的硬性限制。脚本会先复制随包资源，目标目录中已有同名模型或字体则跳过；再联合检测系统/全局 Python 包、`D:\ai_tools`、`AI_TOOLS_HOME` 和目标目录中的 Python import；已有的包跳过，缺少的包才安装到目标目录。`pdf_kb.py` 会自动把 `PDF_KB_TOOLS_HOME` 或默认 `tools`、`D:\ai_tools` 和 `AI_TOOLS_HOME` 加入 `sys.path`，同时保留 Python 自身的全局路径。
+Windows 使用 `scripts/install_windows_dependencies.ps1` 安装依赖。脚本默认目标是技能根目录下的 `tools`，例如安装在 `D:\ai_tools\pdf-kb\pdf-kb-builder` 时，补缺目录是 `D:\ai_tools\pdf-kb\pdf-kb-builder\tools`。如果用户明确需要其他依赖目录，可以传入 `-TargetPath`；这不是必须使用技能内 `tools` 的硬性限制。脚本会先复制随包资源，目标目录中已有同名模型或字体则跳过；再联合检测系统/全局 Python 包（`site.getsitepackages()`、`site.getusersitepackages()`、`sys.path`）、`D:\ai_tools`、`D:\ai_tools` 下所有直接子目录、`AI_TOOLS_HOME`、`AI_TOOLS_HOME` 下所有直接子目录和目标目录中的 Python import；已有的包跳过，缺少的包才安装到目标目录。`pdf_kb.py` 会自动把 `PDF_KB_TOOLS_HOME` 或默认 `tools`、`D:\ai_tools`、`D:\ai_tools` 下所有直接子目录、`AI_TOOLS_HOME` 和 `AI_TOOLS_HOME` 下所有直接子目录加入 `sys.path`，同时保留 Python 自身的全局路径。
 
 不要把依赖包安装到 `D:\ai_tools` 根目录，也不要清理或覆盖该目录中已有的其他工具包。若需要卸载，使用 `-Uninstall`；卸载逻辑只删除本技能默认的 `tools` 目录，并且只清理指向该目录的 `PDF_KB_TOOLS_HOME` 和用户 `Path` 项，不删除自定义 `-TargetPath` 或外部已有工具。
 
-验证安装流程时必须做一次空 `tools` 验证：先运行 `scripts/install_windows_dependencies.ps1 -Uninstall` 删除本技能默认 `tools`，再运行安装脚本。这样才能确认依赖检查会联合使用系统/全局 Python 包、`D:\ai_tools`、`AI_TOOLS_HOME` 和重新创建的技能 `tools`，避免因为旧 `tools` 已经完整而误判验证通过。
+验证安装流程时必须做一次空 `tools` 验证：先运行 `scripts/install_windows_dependencies.ps1 -Uninstall` 删除本技能默认 `tools`，再运行安装脚本。这样才能确认依赖检查会联合使用系统/全局 Python site-packages（`site.getsitepackages()`、`site.getusersitepackages()`、`sys.path`）、`D:\ai_tools`、`AI_TOOLS_HOME` 和重新创建的技能 `tools`，避免因为旧 `tools` 已经完整而误判验证通过。
 
 ## Required Python Packages
 

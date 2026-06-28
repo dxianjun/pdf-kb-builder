@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import site
 from pathlib import Path
 from typing import Any
 
@@ -27,16 +28,56 @@ def add_unique_dependency_path(paths: list[Path], path: Path | None) -> None:
         paths.append(full_path)
 
 
-def dependency_search_paths() -> list[Path]:
+def add_tool_root_and_children(paths: list[Path], tool_root: Path | None) -> None:
+    if tool_root is None:
+        return
+    add_unique_dependency_path(paths, tool_root)
+    try:
+        if tool_root.exists():
+            for child in tool_root.iterdir():
+                if child.is_dir():
+                    add_unique_dependency_path(paths, child)
+    except OSError:
+        return
+
+
+def system_dependency_paths() -> list[Path]:
     paths: list[Path] = []
-    add_unique_dependency_path(paths, PDF_KB_TOOLS_HOME)
-    add_unique_dependency_path(paths, DEFAULT_AI_TOOLS_HOME)
-    ai_tools_home = os.environ.get("AI_TOOLS_HOME")
-    if ai_tools_home:
-        add_unique_dependency_path(paths, Path(ai_tools_home))
+
+    try:
+        for path in site.getsitepackages():
+            add_unique_dependency_path(paths, Path(path))
+    except Exception:
+        pass
+
+    try:
+        user_site = site.getusersitepackages()
+        if user_site:
+            add_unique_dependency_path(paths, Path(user_site))
+    except Exception:
+        pass
+
+    for path in sys.path:
+        if not path:
+            continue
+        add_unique_dependency_path(paths, Path(path))
+
     return paths
 
 
+def dependency_search_paths() -> list[Path]:
+    paths: list[Path] = []
+    add_unique_dependency_path(paths, PDF_KB_TOOLS_HOME)
+    for path in SYSTEM_DEPENDENCY_PATHS:
+        add_unique_dependency_path(paths, path)
+    add_tool_root_and_children(paths, DEFAULT_AI_TOOLS_HOME)
+    ai_tools_home = os.environ.get("AI_TOOLS_HOME")
+    if ai_tools_home:
+        add_tool_root_and_children(paths, Path(ai_tools_home))
+    return paths
+
+
+SYSTEM_DEPENDENCY_PATHS = system_dependency_paths()
 DEPENDENCY_SEARCH_PATHS = dependency_search_paths()
 for dependency_path in reversed(DEPENDENCY_SEARCH_PATHS):
     if dependency_path.exists():
@@ -1039,6 +1080,7 @@ def dependency_status() -> dict[str, Any]:
         "pdf_kb_tools_home_exists": PDF_KB_TOOLS_HOME.exists(),
         "ai_tools_home": str(DEFAULT_AI_TOOLS_HOME),
         "ai_tools_home_exists": DEFAULT_AI_TOOLS_HOME.exists(),
+        "system_dependency_paths": [str(path) for path in SYSTEM_DEPENDENCY_PATHS],
         "dependency_search_paths": [str(path) for path in DEPENDENCY_SEARCH_PATHS],
     }
 

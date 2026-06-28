@@ -326,7 +326,7 @@ class PdfKbBuilderTests(unittest.TestCase):
         requirements_text = (scripts_dir / "requirements.txt").read_text(encoding="utf-8")
 
         self.assertIn("rapidocr_onnxruntime", requirements_text)
-        self.assertIn('"rapidocr_onnxruntime" = @("rapidocr_onnxruntime:RapidOCR")', installer_text)
+        self.assertIn('"rapidocr_onnxruntime" = @("rapidocr:RapidOCR|rapidocr_onnxruntime:RapidOCR")', installer_text)
         self.assertNotIn("spec_in_target", installer_text)
         self.assertIn("getattr(module, part)", installer_text)
 
@@ -336,7 +336,11 @@ class PdfKbBuilderTests(unittest.TestCase):
 
         self.assertIn("PDF_KB_INSTALL_PATHS", installer_text)
         self.assertIn("Get-DependencySearchPaths", installer_text)
+        self.assertIn("Get-PythonSystemSearchPaths", installer_text)
+        self.assertIn("Add-ToolRootAndChildren", installer_text)
+        self.assertIn("site.getsitepackages", installer_text)
         self.assertIn(r"D:\ai_tools", installer_text)
+        self.assertIn("Get-ChildItem -LiteralPath $ToolRoot -Directory", installer_text)
         self.assertIn("AI_TOOLS_HOME", installer_text)
 
     def test_windows_installer_defaults_to_skill_owned_tools_directory(self) -> None:
@@ -378,6 +382,11 @@ class PdfKbBuilderTests(unittest.TestCase):
         self.assertIn("pdf_kb_tools_home_exists", runtime_text)
         self.assertIn("DEFAULT_AI_TOOLS_HOME", runtime_text)
         self.assertIn(r'D:\ai_tools', runtime_text)
+        self.assertIn("add_tool_root_and_children", runtime_text)
+        self.assertIn("iterdir()", runtime_text)
+        self.assertIn("system_dependency_paths", runtime_text)
+        self.assertIn("site.getsitepackages", runtime_text)
+        self.assertIn("SYSTEM_DEPENDENCY_PATHS", runtime_text)
         self.assertIn("ai_tools_home_exists", runtime_text)
 
     def test_runtime_supports_rapidocr_onnxruntime_fallback(self) -> None:
@@ -397,7 +406,9 @@ class PdfKbBuilderTests(unittest.TestCase):
         )
 
         self.assertIn("Explicit -TargetPath may be used", docs)
-        self.assertIn("system/global Python packages, D:\\ai_tools, and the skill tools directory", docs)
+        self.assertIn("system/global Python packages, D:\\ai_tools, all direct child directories", docs)
+        self.assertIn("all direct child directories under D:\\ai_tools and AI_TOOLS_HOME", docs)
+        self.assertIn("system/global site-packages", docs)
         self.assertIn("-Uninstall", docs)
         self.assertIn("only removes the skill-owned default tools directory", docs)
         self.assertIn("do not overwrite AI_TOOLS_HOME", docs)
